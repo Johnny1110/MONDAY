@@ -20,3 +20,12 @@ def get_model(version: str) -> dict:
     if not m:
         raise HTTPException(status_code=404, detail="model version not found")
     return m
+
+
+@router.post("/train")
+def train_model(source: str = "finmind", days: int = 400) -> dict:
+    """Train + register a cold-start GBDT on real free-core data (the quant-researcher's retrain
+    trigger, §6.3). Returns the new version + its OOS rank IC. Synchronous — minutes on a wide
+    universe; the swarm calls it from the monthly recalibration cron (§8)."""
+    from ..models.train import train           # lazy: pulls lightgbm/numpy only on demand
+    return train(source=source, days=days)

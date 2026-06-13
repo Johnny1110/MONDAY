@@ -170,8 +170,11 @@ monday/
   `morgan` + `evva` (resident engineer). **34 unit tests green** + `vue-tsc` clean. Run: `python -m monday`
   (:7790, dashboard at `/`), `python -m monday.pipeline [--source finmind]`, `./scripts/run-tests.sh`,
   `./scripts/smoke.sh`; details in `engine/README.md`.
-- ⬜ **P1 MVP loop**: cold-start GBDT + 1 leader + 6 workers (morgan / data-engineer / quant / a-catalyst /
-  a-chips / reviewer-calibrator / watchdog), auto-producing 20 ideas daily + daily mark-to-market + weekly
+- 🟡 **P1 MVP loop** (in progress on branch `p1-mvp`): ✅ cold-start **GBDT** landed — LightGBM 3-head
+  (Ranker/Regressor/Classifier) in `models/{gbdt,train,cv,labels}.py`, purged walk-forward CV reports
+  honest OOS rank IC (a momentum-only cold start scores ~0/slightly negative — the discipline working),
+  registered with provenance; `--model gbdt` + `POST /api/models/train`. ⬜ Next: the 6-worker roster
+  (data-engineer / quant / a-catalyst / a-chips / reviewer-calibrator / watchdog) + daily auto-run + weekly
   review scorecard.
 - ⬜ **P2 depth** (+a-tech / risk-monitor / quant-researcher, monthly retrain + regime ensemble) → **P3
   optimization** (+strategy-researcher, quarterly org review, event-driven adjustments fully on).

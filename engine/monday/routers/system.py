@@ -28,8 +28,10 @@ def status() -> dict:
 
 @router.post("/run-pipeline")
 def run_pipeline(days: int = 180, mark_forward: int = 1, source: str = "synthetic",
-                 post: bool = False, notify: bool = False) -> dict:
+                 model: str = "baseline", post: bool = False, notify: bool = False) -> dict:
     """Trigger one full chain (ingest → … → mark-to-market). ``source`` selects the ingest
-    adapter: 'synthetic' (offline, default), 'finmind', or 'twse' (real free-core sources)."""
+    adapter ('synthetic' | 'finmind' | 'twse'); ``model`` selects the predictor
+    ('baseline' | 'gbdt' — gbdt needs a trained model, see POST /api/models/train)."""
     from ..pipeline import run                 # lazy: keeps app import light
-    return run(days=days, mark_forward=mark_forward, source=source, post=post, notify=notify)
+    return run(days=days, mark_forward=mark_forward, source=source, model=model,
+               post=post, notify=notify)

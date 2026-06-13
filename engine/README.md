@@ -12,7 +12,7 @@ monday/                 package
 ├── ingest/           synthetic + twse + finmind adapters  clean.py    quality gate + liquidity filter
 │                      (base: cache/rate-limit/retry; parse: ROC dates/numerics; get_source registry)
 ├── snapshot.py         daily PIT snapshot (look-ahead cure) featurestore/ factors (pure) + build
-├── models/baseline.py  empty momentum ranker              signals.py  candidate envelope
+├── models/             baseline (empty) + gbdt (LightGBM 3-head) + train/cv/labels  signals.py
 ├── portfolio.py        paper portfolio + mark-to-market   calibration.py IC / hit / curve / attribution
 ├── triggers.py         drawdown/drift → events            events.py / telegram.py  outbound (no-op safe)
 ├── pipeline.py         the full chain (exit gate)         routers/    one file per /api prefix
@@ -34,6 +34,11 @@ python3 -m venv --system-site-packages .venv     # numpy from system; rest insta
 # real free-core data — FinMind backfill (long history) or TWSE STOCK_DAY (results cached under data/cache):
 .venv/bin/python -m monday.pipeline --source finmind --days 200
 .venv/bin/python -m monday.pipeline --source twse --days 120
+
+# train + register the cold-start GBDT, then run the chain through it (reports OOS rank IC):
+.venv/bin/pip install lightgbm        # macOS also needs OpenMP: `brew install libomp`
+.venv/bin/python -m monday.models.train --source finmind --days 400
+.venv/bin/python -m monday.pipeline --source finmind --model gbdt --days 200
 
 # the HTTP service (:7790):
 .venv/bin/python -m monday

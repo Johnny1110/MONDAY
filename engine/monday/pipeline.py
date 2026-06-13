@@ -64,11 +64,31 @@ def _equity_curve() -> list[float]:
     return [1.0 + sum(v) / len(v) for _, v in sorted(by_date.items())]
 
 
+def _infer(model: str, feat_rows: list[dict]) -> tuple[list[dict], str]:
+    """Run inference with the chosen model. 'gbdt' loads the latest registered GBDT (falling back
+    to baseline with a warning if none is trained); 'baseline' uses the untrained momentum ranker.
+    Both return (predictions, model_version) in the same shape."""
+    if model == "gbdt":
+        version = store.kv_get("gbdt_latest")
+        path = store.kv_get(f"model_path:{version}") if version else None
+        if path and pathlib.Path(path).is_file():
+            from .models import gbdt
+            return gbdt.predict(gbdt.load(path), feat_rows), version
+        log.warning("model=gbdt requested but none trained — falling back to baseline "
+                    "(train one: python -m monday.models.train)")
+    store.register_model(baseline.MODEL_VERSION, train_window="(untrained P0 baseline)",
+                         factor_set=baseline.FACTOR_SET,
+                         notes="P0 transparent cross-sectional momentum ranker")
+    return baseline.infer(feat_rows), baseline.MODEL_VERSION
+
+
 def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
-        post: bool = False, notify: bool = False, source: str = "synthetic") -> dict:
+        post: bool = False, notify: bool = False, source: str = "synthetic",
+        model: str = "baseline") -> dict:
     """Run one full chain. ``source`` selects the ingest adapter ('synthetic' | 'finmind' |
-    'twse'). ``post`` fires swarm webhooks, ``notify`` pushes Telegram (both no-op when
-    unconfigured). Returns a stage-by-stage summary. Requires store.connect() first."""
+    'twse'); ``model`` selects the predictor ('baseline' | 'gbdt'). ``post`` fires swarm webhooks,
+    ``notify`` pushes Telegram (both no-op when unconfigured). Returns a stage-by-stage summary.
+    Requires store.connect() first."""
     out: dict = {"stages": {}}
 
     # 1 — ingest (source-agnostic: synthetic offline, or real free-core TWSE/FinMind)
@@ -103,15 +123,12 @@ def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
     fbuild.write_features(settings.data_dir, feat_rows)
     out["stages"]["features"] = {"rows": len(feat_rows)}
 
-    # 5 — empty baseline model + inference
-    store.register_model(baseline.MODEL_VERSION, train_window="(untrained P0 baseline)",
-                         factor_set=baseline.FACTOR_SET,
-                         notes="P0 transparent cross-sectional momentum ranker")
-    preds = baseline.infer(feat_rows)
-    out["stages"]["inference"] = {"model": baseline.MODEL_VERSION, "ranked": len(preds)}
+    # 5 — inference (baseline momentum ranker, or a trained GBDT via --model gbdt)
+    preds, model_version = _infer(model, feat_rows)
+    out["stages"]["inference"] = {"model": model_version, "ranked": len(preds)}
 
     # 6 — candidate signals (served at /api/signals/today)
-    envelope = signals.build_envelope(as_of, baseline.MODEL_VERSION, REGIME_P0,
+    envelope = signals.build_envelope(as_of, model_version, REGIME_P0,
                                       preds, settings.candidate_pool)
     store.kv_set("signals_today", json.dumps(envelope, ensure_ascii=False))
     out["stages"]["signals"] = {"candidates": envelope["candidate_count"]}
@@ -120,13 +137,13 @@ def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
     n = min(settings.max_recommendations, len(preds))
     recs = []
     for c in preds[:n]:
-        rec = _build_rec(c, as_of, baseline.MODEL_VERSION, REGIME_P0,
+        rec = _build_rec(c, as_of, model_version, REGIME_P0,
                          settings.holding_window_days)
         store.add_recommendation(rec)
         portfolio.open_from_recommendation(rec)
         recs.append(rec)
     rec_envelope = {
-        "as_of_date": as_of, "model_version": baseline.MODEL_VERSION, "regime": REGIME_P0,
+        "as_of_date": as_of, "model_version": model_version, "regime": REGIME_P0,
         "recommendations": [{
             "symbol": r["symbol"], "name": r["name"], "direction": r["direction"],
             "entry_ref": r["entry_ref_price"], "take_profit": r["take_profit_price"],
@@ -182,6 +199,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--days", type=int, default=180)
     p.add_argument("--mark-forward", type=int, default=1)
     p.add_argument("--source", default="synthetic", help="synthetic | finmind | twse")
+    p.add_argument("--model", default="baseline", help="baseline | gbdt")
     p.add_argument("--post", action="store_true", help="fire swarm webhooks")
     p.add_argument("--notify", action="store_true", help="push Telegram")
     a = p.parse_args(argv)
@@ -190,7 +208,7 @@ def main(argv: list[str] | None = None) -> None:
     store.connect(settings.sqlite_path)
     try:
         summary = run(as_of=a.as_of, days=a.days, mark_forward=a.mark_forward,
-                      post=a.post, notify=a.notify, source=a.source)
+                      post=a.post, notify=a.notify, source=a.source, model=a.model)
         print(json.dumps(summary, ensure_ascii=False, indent=2))
     finally:
         store.close()
