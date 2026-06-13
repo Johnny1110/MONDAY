@@ -1,0 +1,5 @@
+# morgan — leader profile (model / effort / cadence). Persona lives in system_prompt.md.
+model: claude-opus-4-8        # strong reasoning — integration + layered review (§7.1)
+effort: ultra
+# Schedule is defined in evva-swarm.yml (leader block). morgan is primarily event-driven
+# (engine webhooks the §6.3 triggers to the leader); the cron there is a safety-net patrol.

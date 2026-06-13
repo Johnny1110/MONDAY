@@ -1,0 +1,56 @@
+name: monday              # → webhook endpoint POST /api/swarm/monday/event
+workdir: .
+
+# Monday — a TW-equity daily stock-picking + self-calibration lab (sibling of Sunday).
+# This is the P0 SKELETON: only the leader and the resident engineer are active, because the
+# platform (Monday engine) is still being built — there is nothing for the analyst/quant roster
+# to drive yet. Decision authority is CONCENTRATED in the leader (whitepaper §3 trust model):
+#
+#   morgan (leader)        = CIO / PM / SOLE DECIDER. In P0: coordinates the build, reviews the
+#                            engine's pipeline output (GET /api/system/status, /api/calibration),
+#                            keeps the strategy constitution (GET/PUT /api/memory/morgan). In P1+
+#                            it finalises the daily ≤20 ideas and runs the layered review (§6).
+#   evva (persona)         = RESIDENT ENGINEER (the evva engineer persona, same as Sunday's `evva`):
+#                            builds/maintains Monday engine from docs/PRD tickets — implement →
+#                            tests green → commit → deploy → verify /health → report. No stock
+#                            picking, never touches the strategy constitution.
+#
+# Boundary discipline (honest version, §3): "only morgan decides" is PROMPT discipline, not a
+# technical enforcement — every /api/* endpoint is token-free. It is acceptable because this is a
+# PAPER portfolio, no real money. Agents drive Monday with generic http_request + GET /manual.
+#
+# Wake discipline: morgan is primarily EVENT-driven — Monday engine webhooks the triggers
+# (portfolio_drawdown / calibration_drift / factor_decay / pipeline_failed, §6.3) to the leader,
+# and teammates send_message him. The cron below is a SAFETY-NET patrol, NOT market polling.
+
+leader:
+  agent: morgan
+  budget_tokens: -1        # never freeze the commander
+  schedule:
+    cron: "0 9 * * 1-5"    # weekday morning patrol (P0 safety net; P1 adds the 23:00 finalize run)
+    prompt: "P0 指揮官巡檢（平台建置期，非看盤）：① GET /api/memory/morgan 回顧策略憲法；② GET /api/system/status 看引擎狀態與上次 pipeline 產出（last_as_of / recommendations / open_positions）；③ 有 evva 的工程回報就驗收（task_verify / 退件）、有未閉環的工程票就推進；④ GET /api/calibration 看校準帳本長出東西沒（P0 是合成資料、空模型，重點是鏈路綠不綠，不是賺賠）；⑤ 憲法有變就 PUT /api/memory/morgan 寫回。平台還沒到能每日選股前，不硬發建議（誠實 > 硬發）。一切正常就一句 stand down。"
+
+workers:
+  - persona: evva    # 特派工程師 — 建/養 Monday engine（docs/PRD 票、bug 修復）
+    model: deepseek-v4-pro
+    effort: ultra
+    when_to_use: "特派工程師 — 接 morgan 的 Monday engine 軟體改動 ticket（docs/PRD 實作、bug 修復）：先讀 CLAUDE.md 8 條不變量 → 實作 → ./scripts/run-tests.sh 綠 → commit main → 照 engine/README 重啟 → 驗 /health → 回報（票號 + commit + 測試證據）。不選股、不碰策略憲法（/api/memory/morgan）。"
+    # 不設 schedule：純 ticket/訊息驅動（task_assign 即喚醒）；工程量低頻，cron 只會空燒 token
+
+  # ── P1 MVP roster (whitepaper §7.2 — add when the engine can produce a daily book) ──────────
+  # Create each agent dir (agents/sub/<name>/) then uncomment. Cron cadence per §8 (TZ Asia/Taipei).
+  # - agent: data-engineer      # 30 21 * * 1-5  拉全源→清洗→PIT 快照→特徵庫
+  # - agent: quant              # 0 22 * * 1-5   載入 registry 模型→推論→寫 /api/signals/today
+  # - agent: a-chips            # 15 22 * * 1-5  三大法人/融資券/主力 籌碼覆蓋
+  # - agent: a-catalyst         # 15 22 * * 1-5  題材/新聞/情緒覆蓋 + 地雷否決
+  # - agent: reviewer-calibrator# 0 14 * * 1-5   逐日對帳→更新 ledger；週六復盤 scorecard
+  # - agent: watchdog           # */15 18-23 * * 1-5  pipeline 健康巡檢（只在異常時通報）
+
+settings:
+  permission_mode: bypass            # unattended 7×24 (operator-confirmed; paper portfolio, no real money)
+  max_iterations: 99
+  daily_budget_tokens: 2000000       # per-member daily cap (morgan uses the -1 exemption; evva is ticket-driven)
+  stall_hard_timeout: "2h"           # hard timeout for long code runs / future training jobs
+  task_stale_threshold: "24h"
+  mailbox_stale_threshold: "30m"
+  retention_days: 90                 # ledger/journal persist long (calibration needs history)

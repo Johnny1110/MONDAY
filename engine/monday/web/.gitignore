@@ -1,0 +1,8 @@
+node_modules/
+*.log
+.vite/
+
+# dist/ IS committed — FastAPI serves it; the engine runs without a Node build step.
+# Re-include it despite the repo-root `dist/` ignore rule.
+!dist/
+!dist/**

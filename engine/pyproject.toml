@@ -1,0 +1,24 @@
+[project]
+name = "monday-engine"
+version = "0.0.1"
+description = "Monday engine — TW-equity daily stock-picking + self-calibration lab platform (P0 scaffold)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pydantic-settings",
+    "numpy",
+    "pyarrow",        # parquet for large feature/price tables (invariant 5)
+]
+
+[project.optional-dependencies]
+# Heavy ML deps are NOT required for P0 (the model is an empty baseline). They are
+# lazily imported by models/* when a real GBDT lands in P1+ (invariant 6).
+ml = ["lightgbm", "pandas", "scikit-learn", "shap"]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["monday*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
