@@ -18,14 +18,13 @@ import pathlib
 from collections import defaultdict
 
 from . import clean as clean_mod
-from . import events, portfolio, signals, snapshot, store, telegram, triggers
+from . import events, portfolio, regime as regime_mod, signals, snapshot, store, telegram, triggers
 from .config import settings
 from .featurestore import build as fbuild
 from .ingest import get_source
 from .models import baseline
 
 log = logging.getLogger("monday.pipeline")
-REGIME_P0 = "neutral"   # the regime classifier is P1 (§5.3); P0 labels every day neutral.
 
 
 def _build_rec(c: dict, as_of: str, model_version: str, regime: str, window: int) -> dict:
@@ -148,6 +147,10 @@ def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
     out["stages"]["clean"] = {"clean": len(cleaned), "flagged": len(flagged),
                               "universe": len(universe), "dropped_illiquid": len(dropped)}
 
+    # regime label (§5.3) — stamped on every idea so per-regime attribution is meaningful
+    regime = regime_mod.regime_for(cleaned, as_of)
+    out["stages"]["regime"] = regime
+
     # 3 — PIT snapshot (look-ahead cure, §4.2)
     rows_on_disk = snapshot.write_snapshot(settings.data_dir, as_of, cleaned)
     out["stages"]["snapshot"] = {"as_of": as_of, "rows_on_disk": rows_on_disk}
@@ -162,7 +165,7 @@ def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
     out["stages"]["inference"] = {"model": model_version, "ranked": len(preds)}
 
     # 6 — candidate signals (served at /api/signals/today)
-    envelope = signals.build_envelope(as_of, model_version, REGIME_P0,
+    envelope = signals.build_envelope(as_of, model_version, regime,
                                       preds, settings.candidate_pool)
     store.kv_set("signals_today", json.dumps(envelope, ensure_ascii=False))
     out["stages"]["signals"] = {"candidates": envelope["candidate_count"]}
@@ -177,7 +180,7 @@ def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
         return out
 
     n = min(settings.max_recommendations, len(preds))
-    recs, rec_envelope = compose_recommendations(preds[:n], as_of, model_version, REGIME_P0)
+    recs, rec_envelope = compose_recommendations(preds[:n], as_of, model_version, regime)
     out["stages"]["recommendations"] = {"written": len(recs)}
 
     # 8 — mark-to-market (open day + forward days): exercises the ledger

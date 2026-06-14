@@ -180,8 +180,12 @@ monday/
   compose the ≤20 book from the analyst overlay (§5.6/§5.7), `POST /api/ledger/reconcile` is
   reviewer-calibrator's daily mark. **44 tests green.** ⬜ Remaining: the ≥4-week live-run gate (§10) —
   operational (launch the swarm with `evva swarm .` and let it run).
-- ⬜ **P2 depth** (+a-tech / risk-monitor / quant-researcher, monthly retrain + regime ensemble) → **P3
-  optimization** (+strategy-researcher, quarterly org review, event-driven adjustments fully on).
+- 🟡 **P2 depth** (branch `p2-depth`): ✅ **regime classifier** (§5.3, `regime.py`) — rule-based label
+  (bull_trend / choppy / risk_off / high_vol) from index trend/breadth/vol, stamped on every idea so
+  per-regime attribution is real. ⬜ Next: portfolio risk gate (§5.7), regime-aware ensemble, monthly
+  retrain + factor-decay→retire ADR. New agents (a-tech / risk-monitor / quant-researcher) get activated
+  after the P1 live run shows where judgment is most lacking (§7.2 data-driven staging).
+- ⬜ **P3 optimization** (+strategy-researcher, quarterly org review, event-driven adjustments fully on).
 
 > **Staffing philosophy**: don't hire the full roster at once (a year of 24/7 tokens is a real cost). Prove the
 > **closed loop** with a minimal roster first, then let the calibration ledger reveal "where judgment is most
