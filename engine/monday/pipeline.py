@@ -96,6 +96,18 @@ def _equity_curve() -> list[float]:
     return [1.0 + sum(v) / len(v) for _, v in sorted(by_date.items())]
 
 
+def _enrich_chips(rows: list[dict], as_of: str, cache_dir: str) -> None:
+    """Merge chip factors (§5.6) into feature rows in place (FinMind source only)."""
+    from datetime import date, timedelta
+
+    from .featurestore import chips
+    from .ingest import finmind
+    syms = sorted({r["symbol"] for r in rows})
+    start = (date.fromisoformat(as_of) - timedelta(days=60)).isoformat()
+    chips.enrich_rows(rows, finmind.fetch_chips(syms, start, as_of,
+                                                settings.finmind_token, cache_dir))
+
+
 def _infer(model: str, feat_rows: list[dict]) -> tuple[list[dict], str]:
     """Run inference with the chosen model. 'gbdt' loads the latest registered GBDT (falling back
     to baseline with a warning if none is trained); 'baseline' uses the untrained momentum ranker.
@@ -155,10 +167,12 @@ def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
     rows_on_disk = snapshot.write_snapshot(settings.data_dir, as_of, cleaned)
     out["stages"]["snapshot"] = {"as_of": as_of, "rows_on_disk": rows_on_disk}
 
-    # 4 — feature store
+    # 4 — feature store (+ chip factors when the source provides them, §5.6)
     feat_rows = fbuild.build_features(cleaned, as_of, universe)
+    if source == "finmind":
+        _enrich_chips(feat_rows, as_of, cache_dir)
     fbuild.write_features(settings.data_dir, feat_rows)
-    out["stages"]["features"] = {"rows": len(feat_rows)}
+    out["stages"]["features"] = {"rows": len(feat_rows), "chips": source == "finmind"}
 
     # 5 — inference (baseline momentum ranker, or a trained GBDT via --model gbdt)
     preds, model_version = _infer(model, feat_rows)

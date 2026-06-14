@@ -140,3 +140,10 @@ def fetch_margin(symbol: str, start, end=None, token: str = "",
                  cache_dir: str | None = None, ttl: float = 43200) -> list[dict]:
     return parse_margin(_chip_fetch("TaiwanStockMarginPurchaseShortSale",
                                     symbol, start, end, token, cache_dir, ttl))
+
+
+def fetch_chips(symbols, start, end=None, token: str = "",
+                cache_dir: str | None = None) -> dict[str, dict]:
+    """{symbol: {inst, margin}} for the universe — the chip series the feature build enriches with."""
+    return {s: {"inst": fetch_institutional(s, start, end, token, cache_dir),
+                "margin": fetch_margin(s, start, end, token, cache_dir)} for s in symbols}

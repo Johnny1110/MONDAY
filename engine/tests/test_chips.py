@@ -30,6 +30,16 @@ class TestChipFactors(unittest.TestCase):
         self.assertEqual(f["foreign_net_5d"], 300)                     # 100+200 only
         self.assertEqual(f["foreign_streak"], 2)
 
+    def test_enrich_rows(self):
+        rows = [{"symbol": "2330", "as_of": "2026-06-11"}, {"symbol": "X", "as_of": "2026-06-11"}]
+        chips_by = {"2330": {"inst": [
+            {"date": "2026-06-10", "foreign_net": 100, "invtrust_net": 0, "dealer_net": 0},
+            {"date": "2026-06-11", "foreign_net": 200, "invtrust_net": 0, "dealer_net": 0}],
+            "margin": []}}
+        chips.enrich_rows(rows, chips_by)
+        self.assertEqual(rows[0]["foreign_streak"], 2)        # 2330 enriched
+        self.assertIsNone(rows[1]["foreign_streak"])          # unknown symbol → None (NaN to GBDT)
+
 
 class TestChipParsers(unittest.TestCase):
     def test_parse_institutional_nets(self):

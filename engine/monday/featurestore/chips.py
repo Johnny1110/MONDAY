@@ -34,6 +34,22 @@ def balance_change(bals: list[float], window: int) -> float | None:
     return bals[-1] / bals[-1 - window] - 1.0
 
 
+# Scale-free chip factors the GBDT uses (raw net-share sums are kept for a-chips but excluded here —
+# they aren't cross-sectionally comparable without shares-outstanding normalization).
+MODEL_FACTORS = ["foreign_streak", "invtrust_streak", "margin_chg_5d", "short_chg_5d"]
+
+
+def enrich_rows(rows: list[dict], chips_by_symbol: dict[str, dict]) -> list[dict]:
+    """Merge the model's chip factors into feature rows in place, PIT per row['as_of']. Symbols
+    without chip data get None (the GBDT reads it as NaN)."""
+    for r in rows:
+        cs = chips_by_symbol.get(r["symbol"])
+        cf = chip_factors(cs["inst"], cs["margin"], r["as_of"]) if cs else {}
+        for k in MODEL_FACTORS:
+            r[k] = cf.get(k)
+    return rows
+
+
 def chip_factors(inst: list[dict], margin: list[dict], as_of: str, window: int = 5) -> dict:
     """PIT chip factors as of ``as_of`` from the institutional + margin series (≤ as_of only)."""
     inst = sorted((r for r in inst if r["date"] <= as_of), key=lambda x: x["date"])

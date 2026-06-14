@@ -79,6 +79,15 @@ def train(source: str = "finmind", days: int = 400, horizon: int | None = None,
     log.info("training set: %d samples over %d dates", len(rows),
              len({r["as_of"] for r in rows}))
 
+    if source == "finmind":          # fold in chip factors (§5.6) PIT per training date
+        from ..featurestore import chips
+        from ..ingest import finmind
+        syms = sorted({r["symbol"] for r in rows})
+        chips.enrich_rows(rows, finmind.fetch_chips(
+            syms, min(r["as_of"] for r in rows), max(r["as_of"] for r in rows),
+            settings.finmind_token, cache_dir))
+        log.info("enriched training rows with chip factors")
+
     ic = oos_rank_ic(rows, horizon, embargo, n_splits)
     bundle = gbdt.train_heads(rows)
 
