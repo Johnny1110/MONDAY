@@ -50,9 +50,42 @@ def _build_rec(c: dict, as_of: str, model_version: str, regime: str, window: int
         "contributing_factors": [k for k in ("mom_20d", "mom_60d", "mom_120d")
                                  if c.get(k) is not None and c[k] > 0],
         "contributing_analysts": [],             # LLM overlay is the swarm's job (P1, §5.6)
-        "rationale": "P0 baseline momentum rank (untrained model; LLM overlay pending in P1).",
-        "risk_notes": "Synthetic data — NOT investable; PIT/look-ahead disciplines apply from P1.",
+        "rationale": f"Cross-sectional model rank ({model_version}).",
+        "risk_notes": "Paper portfolio, not investment advice; cold-start model — treat as a hypothesis (§9).",
     }
+
+
+def _rec_envelope(recs: list[dict], as_of: str, model_version: str, regime: str) -> dict:
+    """The daily recommendation envelope (whitepaper appendix C)."""
+    return {
+        "as_of_date": as_of, "model_version": model_version, "regime": regime,
+        "recommendations": [{
+            "symbol": r["symbol"], "name": r["name"], "direction": r["direction"],
+            "entry_ref": r["entry_ref_price"], "take_profit": r["take_profit_price"],
+            "tp_pct": round((r["take_profit_price"] / r["entry_ref_price"] - 1) * 100, 1),
+            "stop_loss": r["stop_loss_price"], "holding_window_days": r["holding_window_days"],
+            "conviction": r["conviction"], "factors": r["contributing_factors"],
+            "analysts": r["contributing_analysts"], "rationale": r["rationale"],
+            "risk_notes": r["risk_notes"],
+        } for r in recs],
+    }
+
+
+def compose_recommendations(preds: list[dict], as_of: str, model_version: str,
+                            regime: str) -> tuple[list[dict], dict]:
+    """Write recommendations (recorded at birth, §6.1) + open their paper positions, and persist
+    the daily envelope. Used by the autonomous run AND by morgan's finalize endpoint (which passes
+    the analyst-curated subset). ``preds`` rows carry flattened feature columns + close + the
+    predicted_* fields. Returns (recs, envelope)."""
+    recs = []
+    for c in preds:
+        rec = _build_rec(c, as_of, model_version, regime, settings.holding_window_days)
+        store.add_recommendation(rec)
+        portfolio.open_from_recommendation(rec)
+        recs.append(rec)
+    envelope = _rec_envelope(recs, as_of, model_version, regime)
+    store.kv_set("recommendations_today", json.dumps(envelope, ensure_ascii=False))
+    return recs, envelope
 
 
 def _equity_curve() -> list[float]:
@@ -84,11 +117,12 @@ def _infer(model: str, feat_rows: list[dict]) -> tuple[list[dict], str]:
 
 def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
         post: bool = False, notify: bool = False, source: str = "synthetic",
-        model: str = "baseline") -> dict:
-    """Run one full chain. ``source`` selects the ingest adapter ('synthetic' | 'finmind' |
-    'twse'); ``model`` selects the predictor ('baseline' | 'gbdt'). ``post`` fires swarm webhooks,
-    ``notify`` pushes Telegram (both no-op when unconfigured). Returns a stage-by-stage summary.
-    Requires store.connect() first."""
+        model: str = "baseline", finalize: bool = True) -> dict:
+    """Run the chain. ``source`` selects the ingest adapter ('synthetic' | 'finmind' | 'twse');
+    ``model`` selects the predictor ('baseline' | 'gbdt'). ``finalize=True`` (autonomous) composes
+    the full book + marks; ``finalize=False`` stops after signals so the swarm composes the book
+    via the analyst overlay (§5.6/§5.7). ``post`` fires swarm webhooks, ``notify`` pushes Telegram
+    (both no-op when unconfigured). Returns a stage-by-stage summary. Requires store.connect() first."""
     out: dict = {"stages": {}}
 
     # 1 — ingest (source-agnostic: synthetic offline, or real free-core TWSE/FinMind)
@@ -133,28 +167,17 @@ def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
     store.kv_set("signals_today", json.dumps(envelope, ensure_ascii=False))
     out["stages"]["signals"] = {"candidates": envelope["candidate_count"]}
 
-    # 7 — write recommendations + open paper positions ("write a fake idea")
+    # 7 — finalize. Autonomous mode composes the full book; the swarm flow uses finalize=False
+    # (data-engineer/quant prepare signals → analysts overlay → morgan composes via
+    # POST /api/recommendations/finalize), §5.6/§5.7.
+    if not finalize:
+        out["stages"]["recommendations"] = {
+            "written": 0,
+            "note": "finalize=False — signals only; compose via POST /api/recommendations/finalize"}
+        return out
+
     n = min(settings.max_recommendations, len(preds))
-    recs = []
-    for c in preds[:n]:
-        rec = _build_rec(c, as_of, model_version, REGIME_P0,
-                         settings.holding_window_days)
-        store.add_recommendation(rec)
-        portfolio.open_from_recommendation(rec)
-        recs.append(rec)
-    rec_envelope = {
-        "as_of_date": as_of, "model_version": model_version, "regime": REGIME_P0,
-        "recommendations": [{
-            "symbol": r["symbol"], "name": r["name"], "direction": r["direction"],
-            "entry_ref": r["entry_ref_price"], "take_profit": r["take_profit_price"],
-            "tp_pct": round((r["take_profit_price"] / r["entry_ref_price"] - 1) * 100, 1),
-            "stop_loss": r["stop_loss_price"], "holding_window_days": r["holding_window_days"],
-            "conviction": r["conviction"], "factors": r["contributing_factors"],
-            "analysts": r["contributing_analysts"], "rationale": r["rationale"],
-            "risk_notes": r["risk_notes"],
-        } for r in recs],
-    }
-    store.kv_set("recommendations_today", json.dumps(rec_envelope, ensure_ascii=False))
+    recs, rec_envelope = compose_recommendations(preds[:n], as_of, model_version, REGIME_P0)
     out["stages"]["recommendations"] = {"written": len(recs)}
 
     # 8 — mark-to-market (open day + forward days): exercises the ledger
@@ -182,7 +205,7 @@ def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
     out["portfolio"] = psum
     out["triggers_fired"] = [e["data"]["event_type"] for e in fired]
 
-    store.add_report(f"P0 pipeline run — {as_of}",
+    store.add_report(f"pipeline run — {as_of}",
                      f"{len(recs)} ideas written; portfolio={psum}; "
                      f"triggers={out['triggers_fired']}", kind="recommendation")
     if notify:
@@ -191,15 +214,37 @@ def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
     return out
 
 
+def reconcile(as_of: str | None = None, source: str = "finmind", days: int = 30) -> dict:
+    """Daily mark-to-market of all OPEN positions against the latest available prices
+    (reviewer-calibrator's daily duty, §6.1). Standalone — writes no new recommendations.
+    Requires store.connect() first."""
+    fetch = get_source(source)
+    cache_dir = str(pathlib.Path(settings.data_dir) / "cache")
+    bars = fetch(days=days, cache_dir=cache_dir, token=settings.finmind_token)
+    if not bars:
+        raise RuntimeError(f"ingest source {source!r} returned no bars")
+    bar_idx = {(b["symbol"], b["date"]): b for b in bars}
+    mark_date = as_of or max(b["date"] for b in bars)
+    syms = {p["symbol"] for p in store.list_positions(status="open")}
+    lookup = {s: bar_idx[(s, mark_date)] for s in syms if (s, mark_date) in bar_idx}
+    res = portfolio.mark_positions(mark_date, lookup, settings.holding_window_days)
+    store.kv_set("last_reconcile", mark_date)
+    return {"mark_date": mark_date, **res, "portfolio": portfolio.summary()}
+
+
 def main(argv: list[str] | None = None) -> None:
     import argparse
 
-    p = argparse.ArgumentParser(description="Run one Monday P0 pipeline chain")
+    p = argparse.ArgumentParser(description="Run the Monday pipeline (or reconcile the ledger)")
     p.add_argument("--as-of", default=None, help="anchor date (default: latest available day)")
     p.add_argument("--days", type=int, default=180)
     p.add_argument("--mark-forward", type=int, default=1)
     p.add_argument("--source", default="synthetic", help="synthetic | finmind | twse")
     p.add_argument("--model", default="baseline", help="baseline | gbdt")
+    p.add_argument("--no-finalize", dest="finalize", action="store_false",
+                   help="stop after signals (don't auto-compose the book)")
+    p.add_argument("--reconcile", action="store_true",
+                   help="mark-to-market open positions instead of running the chain")
     p.add_argument("--post", action="store_true", help="fire swarm webhooks")
     p.add_argument("--notify", action="store_true", help="push Telegram")
     a = p.parse_args(argv)
@@ -207,8 +252,12 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
     store.connect(settings.sqlite_path)
     try:
-        summary = run(as_of=a.as_of, days=a.days, mark_forward=a.mark_forward,
-                      post=a.post, notify=a.notify, source=a.source, model=a.model)
+        if a.reconcile:
+            summary = reconcile(as_of=a.as_of, source=a.source)
+        else:
+            summary = run(as_of=a.as_of, days=a.days, mark_forward=a.mark_forward,
+                          post=a.post, notify=a.notify, source=a.source, model=a.model,
+                          finalize=a.finalize)
         print(json.dumps(summary, ensure_ascii=False, indent=2))
     finally:
         store.close()

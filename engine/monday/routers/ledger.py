@@ -19,3 +19,11 @@ def marks(rec_id: str | None = None, date: str | None = None,
 @router.get("/outcomes")
 def outcomes(page: int = 1, page_size: int = 50) -> dict:
     return pagination.paginate(store.list_outcomes(), page, page_size)
+
+
+@router.post("/reconcile")
+def reconcile(source: str = "finmind", as_of: str | None = None) -> dict:
+    """Daily mark-to-market of all open positions (reviewer-calibrator's duty, §6.1). Marks against
+    the latest available prices for ``as_of`` and settles any TP/SL/timeout. Returns the run summary."""
+    from ..pipeline import reconcile as _reconcile     # lazy: keeps app import light
+    return _reconcile(as_of=as_of, source=source)

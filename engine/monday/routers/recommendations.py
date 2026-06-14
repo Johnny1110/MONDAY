@@ -12,6 +12,7 @@ import json
 from fastapi import APIRouter, HTTPException
 
 from .. import pagination, portfolio, store
+from ..config import settings
 
 router = APIRouter(prefix="/api/recommendations", tags=["recommendations"])
 
@@ -40,3 +41,26 @@ def add_recommendation(rec: dict) -> dict:
     if saved.get("entry_ref_price"):
         portfolio.open_from_recommendation(saved)
     return saved
+
+
+@router.post("/finalize")
+def finalize(payload: dict) -> dict:
+    """morgan composes the day's book (§5.7): pick ≤max symbols from today's candidates (after the
+    analyst overlay) and commit them. Body: {symbols: ["2330", ...]}. Builds each rec from the
+    stored signals, opens its paper position, and returns the appendix-C envelope."""
+    symbols = payload.get("symbols") or []
+    raw = store.kv_get("signals_today")
+    if not raw:
+        raise HTTPException(status_code=409,
+                            detail="no signals today — run the prepare pipeline first (finalize=false)")
+    env = json.loads(raw)
+    by_sym = {c["symbol"]: c for c in env.get("candidates", [])}
+    chosen = [{**by_sym[s], **(by_sym[s].get("factors") or {})}  # flatten factors for the rec builder
+              for s in symbols if s in by_sym][: settings.max_recommendations]
+    if not chosen:
+        raise HTTPException(status_code=422,
+                            detail="none of the requested symbols are in today's candidates")
+    from ..pipeline import compose_recommendations    # lazy: keeps app import light
+    _, envelope = compose_recommendations(chosen, env["as_of_date"], env["model_version"],
+                                          env.get("regime", "neutral"))
+    return envelope

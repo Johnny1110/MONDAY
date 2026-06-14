@@ -175,8 +175,11 @@ monday/
   cold start ≈ 0 — the discipline working), registered with provenance; `--model gbdt` +
   `POST /api/models/train`. ✅ **6-worker roster built + activated** in `evva-swarm.yml` (data-engineer /
   quant / a-chips / a-catalyst / reviewer-calibrator / watchdog, + leader `morgan` nightly finalize +
-  `evva`), each domain-tools-only with §8 cron cadence. ⬜ Next: engine decomposition for a signals-only
-  run so morgan composes the book from the analyst overlay (§5.6/§5.7), then the ≥4-week live-run gate (§10).
+  `evva`), each domain-tools-only with §8 cron cadence. ✅ **human-in-the-loop decomposition** —
+  `run-pipeline?finalize=false` prepares signals only, `POST /api/recommendations/finalize` lets morgan
+  compose the ≤20 book from the analyst overlay (§5.6/§5.7), `POST /api/ledger/reconcile` is
+  reviewer-calibrator's daily mark. **44 tests green.** ⬜ Remaining: the ≥4-week live-run gate (§10) —
+  operational (launch the swarm with `evva swarm .` and let it run).
 - ⬜ **P2 depth** (+a-tech / risk-monitor / quant-researcher, monthly retrain + regime ensemble) → **P3
   optimization** (+strategy-researcher, quarterly org review, event-driven adjustments fully on).
 

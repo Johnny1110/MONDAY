@@ -31,7 +31,7 @@ leader:
   budget_tokens: -1        # never freeze the commander
   schedule:
     cron: "0 23 * * 1-5"   # nightly finalize (after analyst overlay); morning re-check via schedule_set
-    prompt: "P1 每日定案（盤後）：① GET /api/memory/morgan 讀策略憲法（共識/watchlist/停利停損公式/standing rules）；② GET /api/signals/today 看量化候選，收 a-chips/a-catalyst 的覆蓋訊息（籌碼背書、題材新鮮度、地雷否決）；③ 整合量化排名 × 質化覆蓋 curate 當日 ≤20 檔——GET /api/recommendations/today 覆核引擎已寫入的書，被分析師否決者剔除、必要時 POST /api/recommendations 修訂；④ POST /api/reports 推 User（當日建議摘要 + 重點理由與風險）；⑤ 盤點 task/proposal 看板、驗收隊友回報、處理觸發式事件（回撤/漂移/失敗）未閉環者；data/pipeline 不齊或品質異常則當日不發（誠實 > 硬發）。憲法有變 PUT /api/memory/morgan 寫回。"
+    prompt: "P1 每日定案（盤後）：① GET /api/memory/morgan 讀策略憲法（共識/watchlist/停利停損公式/standing rules）；② GET /api/signals/today 看量化候選，收 a-chips/a-catalyst 的覆蓋訊息（籌碼背書、題材新鮮度、地雷否決）；③ 整合量化排名 × 質化覆蓋，選 ≤20 檔——剔除被分析師否決者，POST /api/recommendations/finalize {symbols:[...]} 寫進建議與紙上投組；④ POST /api/reports 推 User（當日建議摘要 + 重點理由與風險）；⑤ 盤點 task/proposal 看板、驗收隊友回報、處理觸發式事件（回撤/漂移/失敗）未閉環者；data/pipeline 不齊或品質異常則當日不發（誠實 > 硬發）。憲法有變 PUT /api/memory/morgan 寫回。"
 
 workers:
   - persona: evva            # 特派工程師 — 建/養 Monday engine（docs/PRD 票、bug 修復）
@@ -43,7 +43,7 @@ workers:
   - agent: data-engineer
     schedule:
       cron: "30 21 * * 1-5"  # run after margin/short balances settle (~21:00)
-      prompt: "盤後資料管線：POST /api/system/run-pipeline?source=finmind&model=gbdt 產當日 資料→PIT快照→特徵→推論→候選→開倉對帳；驗證 GET /api/universe、/api/features 覆蓋與品質（缺值/還原權值斷點/來源不一致/爬取延遲）。品質異常標記並通報 morgan，嚴重者明說建議當日不發。沒問題回一句 ready。"
+      prompt: "盤後資料管線：POST /api/system/run-pipeline?source=finmind&model=gbdt&finalize=false 產當日 資料→PIT快照→特徵→推論→候選（不自動定案，交 morgan）；驗證 GET /api/universe、/api/features 覆蓋與品質（缺值/還原權值斷點/來源不一致/爬取延遲）。品質異常標記並通報 morgan，嚴重者明說建議當日不發。沒問題回一句 ready。"
   - agent: quant
     schedule:
       cron: "0 22 * * 1-5"
@@ -60,7 +60,7 @@ workers:
     budget_tokens: -1        # the calibration engine is never frozen by the daily budget breaker
     schedule:
       cron: "0 14 * * 1-5"   # daily reconcile; weekly review (Sat) is set by morgan via schedule_set (§6.5)
-      prompt: "逐日對帳：GET /api/ledger/*、/api/portfolio 確認 mark-to-market 與到期結算正確、檢查觸發條件（回撤/校準漂移/因子衰減）是否成立；異常通報 morgan。週六復盤場（morgan 以 schedule_set 安排）：GET /api/calibration + POST /api/calibration/run 產 scorecard、歸因（決策錯 vs 校準錯 vs 公式錯分開記）、1–3 條可執行調整提案回 morgan，POST /api/journal 給 User。雜訊不調整也是合法輸出。"
+      prompt: "逐日對帳：POST /api/ledger/reconcile?source=finmind 對開倉部位 mark-to-market（自動結算觸 TP/SL/到期者）→ GET /api/ledger/*、/api/portfolio 覆核、檢查觸發條件（回撤/校準漂移/因子衰減）是否成立；異常通報 morgan。週六復盤場（morgan 以 schedule_set 安排）：GET /api/calibration + POST /api/calibration/run 產 scorecard、歸因（決策錯 vs 校準錯 vs 公式錯分開記）、1–3 條可執行調整提案回 morgan，POST /api/journal 給 User。雜訊不調整也是合法輸出。"
   - agent: watchdog
     schedule:
       cron: "*/15 18-23 * * 1-5"

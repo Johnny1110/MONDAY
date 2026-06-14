@@ -14,10 +14,10 @@ Base URL: `http://127.0.0.1:7790`
 ## System
 - `GET /health` — liveness ping.
 - `GET /api/system/status` — versions, last pipeline day, counts.
-- `POST /api/system/run-pipeline?days=180&source=synthetic&mark_forward=1&post=false&notify=false`
-  — run one full chain (ingest → clean → PIT snapshot → features → empty model → ≤20 recs →
-  mark-to-market). `source` ∈ {`synthetic`, `finmind`, `twse`}; `post=true` fires swarm webhooks;
-  `notify=true` pushes Telegram.
+- `POST /api/system/run-pipeline?source=synthetic&model=baseline&finalize=true&days=180` — run the
+  chain (ingest → clean → PIT snapshot → features → model → signals [→ recommend → mark]). `source` ∈
+  {`synthetic`,`finmind`,`twse`}; `model` ∈ {`baseline`,`gbdt`}; **`finalize=false` stops after signals**
+  (the swarm composes the book); `post`/`notify` fire swarm webhooks / Telegram.
 
 ## Data plane (read)
 - `GET /api/universe?as_of=` — analysable pool after the liquidity gate (§4.1).
@@ -25,6 +25,7 @@ Base URL: `http://127.0.0.1:7790`
 - `GET /api/factors` — factor catalog (what each feature column means).
 - `GET /api/features?as_of=&symbol=` — computed feature rows for a day (§4.3).
 - `GET /api/models` · `GET /api/models/{version}` — the model registry (§5.4).
+- `POST /api/models/train?source=finmind&days=400` — train + register a cold-start GBDT; reports OOS rank IC.
 
 ## Decision plane
 - `GET /api/signals/today` — the model's candidate ranking (you overlay/veto WITHIN this set;
@@ -32,11 +33,14 @@ Base URL: `http://127.0.0.1:7790`
 - `GET /api/recommendations/today` — the daily envelope (appendix C contract).
 - `GET /api/recommendations?as_of=` — persisted ideas (paginated).
 - `POST /api/recommendations` — commit one finalised idea `{rec_id, symbol, as_of_date, …}`;
-  opens its paper position (morgan's endpoint, §5.7).
+  opens its paper position.
+- `POST /api/recommendations/finalize` `{symbols:[…]}` — compose the day's ≤20 book from today's
+  candidates after the analyst overlay (morgan, §5.7); opens positions, returns the envelope.
 
 ## Portfolio + ledger + calibration
 - `GET /api/portfolio?status=open` — paper positions + summary.
 - `GET /api/ledger/marks?rec_id=|date=` · `GET /api/ledger/outcomes` — the calibration ledger.
+- `POST /api/ledger/reconcile?source=finmind` — daily mark-to-market of open positions (reviewer-calibrator).
 - `GET /api/calibration` — live scorecard (IC / hit-rate / calibration curve / attribution).
 - `GET /api/calibration/runs` · `POST /api/calibration/run?window=weekly` — snapshot a scorecard
   (the weekly review's input, §6.2).

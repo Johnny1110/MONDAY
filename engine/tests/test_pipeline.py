@@ -34,6 +34,33 @@ class TestPipelineSmoke(unittest.TestCase):
             finally:
                 store.close()
 
+    def test_signals_only_then_compose_then_reconcile(self):
+        # the swarm flow: prepare signals (no recs) → morgan composes a subset → reconcile marks them
+        import json
+        from monday import pipeline, store
+        from monday.config import settings
+        with tempfile.TemporaryDirectory() as tmp:
+            settings.sqlite_path = ":memory:"
+            settings.data_dir = os.path.join(tmp, "data")
+            store.connect(settings.sqlite_path)
+            try:
+                s = pipeline.run(days=160, mark_forward=1, finalize=False)
+                self.assertEqual(s["stages"]["recommendations"]["written"], 0)
+                self.assertGreater(s["stages"]["signals"]["candidates"], 0)
+                self.assertEqual(len(store.list_positions(status="open")), 0)  # nothing auto-opened
+
+                env = json.loads(store.kv_get("signals_today"))
+                chosen = [{**c, **(c.get("factors") or {})} for c in env["candidates"][:3]]
+                recs, _ = pipeline.compose_recommendations(
+                    chosen, env["as_of_date"], env["model_version"], "neutral")
+                self.assertEqual(len(recs), 3)
+                self.assertEqual(len(store.list_positions(status="open")), 3)
+
+                r = pipeline.reconcile(source="synthetic", days=160)
+                self.assertEqual(r["marked"], 3)
+            finally:
+                store.close()
+
 
 if __name__ == "__main__":
     unittest.main()
