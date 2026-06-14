@@ -24,9 +24,19 @@ def _synthetic_source(days, end_date=None, cache_dir=None, token="", symbols=Non
     return _synth_generate(end=end_date, days=days, symbols=symbols)
 
 
+def _real_universe(symbols, cache_dir):
+    """Resolve the symbol list for a real source: caller-given, else the top-N listed board by
+    liquidity (§4.1), falling back to the curated set if TWSE is unreachable."""
+    if symbols is not None:
+        return symbols
+    from ..config import settings
+    from .universe import build_universe
+    return build_universe(settings.universe_size, cache_dir=cache_dir) or DEFAULT_SYMBOLS
+
+
 def _finmind_source(days, end_date=None, cache_dir=None, token="", symbols=None):
     from . import finmind
-    symbols = symbols or DEFAULT_SYMBOLS
+    symbols = _real_universe(symbols, cache_dir)
     end = end_date or date.today()
     start = end - timedelta(days=int(days * 1.7) + 20)   # calendar span → ~days trading rows
     bars: list[dict] = []
@@ -37,7 +47,7 @@ def _finmind_source(days, end_date=None, cache_dir=None, token="", symbols=None)
 
 def _twse_source(days, end_date=None, cache_dir=None, token="", symbols=None):
     from . import twse
-    symbols = symbols or DEFAULT_SYMBOLS
+    symbols = _real_universe(symbols, cache_dir)
     end = end_date or date.today()
     months = max(2, days // 18 + 2)
     bars: list[dict] = []

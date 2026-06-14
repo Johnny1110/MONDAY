@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     drawdown_trigger_pct: float = 8.0   # portfolio_drawdown webhook threshold
     max_per_sector: int = 5             # risk gate: ≤N names per industry (§5.7)
     liquidity_adv_floor: float = 0.0    # risk gate: min 20d avg dollar volume (0 = off; universe gate already filters)
+    universe_size: int = 300            # real sources: top-N listed names by liquidity (§4.1; ~800-1000 in prod)
 
 
 settings = Settings()
