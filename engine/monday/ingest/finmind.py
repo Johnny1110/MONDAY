@@ -72,3 +72,71 @@ def fetch_stock_info(token: str = "", cache_dir: str | None = None,
     payload = base.fetch_json(API, params, cache_dir=cache_dir, ttl=ttl,
                               rate_key="finmind", min_interval=0.6)
     return parse_stock_info(payload)
+
+
+# Three institutional desks (§4.3 籌碼): foreign / investment-trust / dealer net flow.
+_FOREIGN = {"Foreign_Investor", "Foreign_Dealer_Self"}
+_DEALER = {"Dealer_self", "Dealer_Hedging"}
+
+
+def parse_institutional(payload: dict | None) -> list[dict]:
+    """TaiwanStockInstitutionalInvestorsBuySell (one row per desk per day) → per-date net flows
+    {date, foreign_net, invtrust_net, dealer_net} (shares), ascending."""
+    if not payload or payload.get("status") != 200:
+        return []
+    by_date: dict[str, dict] = {}
+    for r in payload.get("data") or []:
+        d, nm = r.get("date"), r.get("name")
+        if not d:
+            continue
+        try:
+            net = int(r.get("buy") or 0) - int(r.get("sell") or 0)
+        except (TypeError, ValueError):
+            continue
+        agg = by_date.setdefault(d, {"date": d, "foreign_net": 0, "invtrust_net": 0, "dealer_net": 0})
+        if nm in _FOREIGN:
+            agg["foreign_net"] += net
+        elif nm == "Investment_Trust":
+            agg["invtrust_net"] += net
+        elif nm in _DEALER:
+            agg["dealer_net"] += net
+    return [by_date[d] for d in sorted(by_date)]
+
+
+def parse_margin(payload: dict | None) -> list[dict]:
+    """TaiwanStockMarginPurchaseShortSale → per-date {date, margin_balance, short_balance}, ascending."""
+    if not payload or payload.get("status") != 200:
+        return []
+    out = []
+    for r in payload.get("data") or []:
+        if not r.get("date"):
+            continue
+        try:
+            out.append({"date": r["date"],
+                        "margin_balance": float(r.get("MarginPurchaseTodayBalance") or 0),
+                        "short_balance": float(r.get("ShortSaleTodayBalance") or 0)})
+        except (TypeError, ValueError):
+            continue
+    return sorted(out, key=lambda x: x["date"])
+
+
+def _chip_fetch(dataset: str, symbol: str, start, end, token, cache_dir, ttl):
+    params = {"dataset": dataset, "data_id": symbol, "start_date": str(start)}
+    if end:
+        params["end_date"] = str(end)
+    if token:
+        params["token"] = token
+    return base.fetch_json(API, params, cache_dir=cache_dir, ttl=ttl,
+                           rate_key="finmind", min_interval=0.6)
+
+
+def fetch_institutional(symbol: str, start, end=None, token: str = "",
+                        cache_dir: str | None = None, ttl: float = 43200) -> list[dict]:
+    return parse_institutional(_chip_fetch("TaiwanStockInstitutionalInvestorsBuySell",
+                                           symbol, start, end, token, cache_dir, ttl))
+
+
+def fetch_margin(symbol: str, start, end=None, token: str = "",
+                 cache_dir: str | None = None, ttl: float = 43200) -> list[dict]:
+    return parse_margin(_chip_fetch("TaiwanStockMarginPurchaseShortSale",
+                                    symbol, start, end, token, cache_dir, ttl))

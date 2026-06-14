@@ -24,6 +24,8 @@ Base URL: `http://127.0.0.1:7790`
 - `GET /api/prices?symbol=2330&as_of=` — daily OHLCV from the PIT snapshot.
 - `GET /api/factors` — factor catalog (what each feature column means).
 - `GET /api/features?as_of=&symbol=` — computed feature rows for a day (§4.3).
+- `GET /api/chips?symbol=2330&as_of=` — institutional-flow / margin chip factors (籌碼, §5.6):
+  foreign/investment-trust net-flow + streak, margin/short balance change. a-chips's data.
 - `GET /api/models` · `GET /api/models/{version}` — the model registry (§5.4).
 - `POST /api/models/train?source=finmind&days=400` — train + register a cold-start GBDT; reports OOS rank IC.
 

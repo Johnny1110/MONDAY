@@ -39,7 +39,7 @@ veto. Output is **paper-portfolio only — no real money, ever.**
 3. **Any list returning bulk data is paginated**, using the unified envelope `{items,page,page_size,total,has_more}`
    (reuse Sunday's `pagination`).
 4. **API prefixes split by module**, one `routers/` module each: `/api/universe` `prices` `factors`
-   `features` `models` `signals` `recommendations` `portfolio` `ledger` `calibration` `news` `sentiment`
+   `features` `models` `signals` `recommendations` `portfolio` `ledger` `calibration` `chips` `news` `sentiment`
    `memory` `journal` `reports` `system` `admin` (admin is operator-only, never advertised to agents).
 5. **No Postgres/Redis.** Transactional persistent state = **sqlite** (recommendations / paper_portfolio /
    ledger / calibration / model_registry / memory / journal / reports / kv); large feature/price tables =
@@ -184,8 +184,10 @@ monday/
   (bull_trend / choppy / risk_off / high_vol) from index trend/breadth/vol, stamped on every idea so
   per-regime attribution is real. ✅ **portfolio risk gate** (§5.7, `risk.py`) — sector-concentration /
   name-count / liquidity checks (FinMind sector data); advisory on morgan's `/finalize` +
-  `GET /api/portfolio/risk` + a dashboard panel. ⬜ Next: regime-aware ensemble, monthly retrain +
-  factor-decay→retire ADR. New agents (a-tech / risk-monitor / quant-researcher) get activated
+  `GET /api/portfolio/risk` + a dashboard panel. ✅ **chips factor group** (籌碼, §4.3/§5.6) — FinMind
+  三大法人 + 融資券 → net-flow / streak / margin-change factors via `GET /api/chips` (gives a-chips real
+  data). ⬜ Next: fold chips into the GBDT + retrain (does OOS IC improve?), regime-aware ensemble,
+  monthly retrain + factor-decay→retire ADR. New agents (a-tech / risk-monitor / quant-researcher) get activated
   after the P1 live run shows where judgment is most lacking (§7.2 data-driven staging).
 - ⬜ **P3 optimization** (+strategy-researcher, quarterly org review, event-driven adjustments fully on).
 
