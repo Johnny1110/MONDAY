@@ -43,3 +43,32 @@ def fetch_price(symbol: str, start, end=None, token: str = "", name: str | None 
     payload = base.fetch_json(API, params, cache_dir=cache_dir, ttl=ttl,
                               rate_key="finmind", min_interval=0.6)
     return parse_price(payload, name)
+
+
+def parse_stock_info(payload: dict | None) -> dict[str, str]:
+    """TaiwanStockInfo JSON → {stock_id: sector}. A stock lists several industry_category rows
+    (a specific sub-industry plus the broad '電子工業' umbrella); prefer the specific one — that's
+    what the §5.7 sector-concentration gate cares about ('不能 20 檔都是半導體')."""
+    if not payload or payload.get("status") != 200:
+        return {}
+    cats: dict[str, list[str]] = {}
+    for r in payload.get("data") or []:
+        sid, ind = r.get("stock_id"), r.get("industry_category")
+        if sid and ind:
+            cats.setdefault(sid, []).append(ind)
+    out: dict[str, str] = {}
+    for sid, inds in cats.items():
+        specific = [i for i in inds if i != "電子工業"]
+        out[sid] = (specific or inds)[0]
+    return out
+
+
+def fetch_stock_info(token: str = "", cache_dir: str | None = None,
+                     ttl: float = 604800) -> dict[str, str]:
+    """{stock_id: sector} for every listed stock (cached 7d — sectors rarely change)."""
+    params = {"dataset": "TaiwanStockInfo"}
+    if token:
+        params["token"] = token
+    payload = base.fetch_json(API, params, cache_dir=cache_dir, ttl=ttl,
+                              rate_key="finmind", min_interval=0.6)
+    return parse_stock_info(payload)

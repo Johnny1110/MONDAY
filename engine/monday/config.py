@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     holding_window_days: int = 20       # ≤1-month swing window
     candidate_pool: int = 50            # top-N the model hands to the LLM overlay
     drawdown_trigger_pct: float = 8.0   # portfolio_drawdown webhook threshold
+    max_per_sector: int = 5             # risk gate: ≤N names per industry (§5.7)
+    liquidity_adv_floor: float = 0.0    # risk gate: min 20d avg dollar volume (0 = off; universe gate already filters)
 
 
 settings = Settings()

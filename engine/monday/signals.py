@@ -27,6 +27,7 @@ def build_envelope(as_of: str, model_version: str, regime: str,
             "close": c["close"],
             "predicted_return": c["predicted_return"],
             "predicted_prob_tp": c["predicted_prob_tp"],
+            "adv_20d": c.get("adv_20d"),          # carried for the §5.7 liquidity gate at finalize
             "factors": {k: c.get(k) for k in _FACTOR_KEYS},
         } for c in cands],
     }

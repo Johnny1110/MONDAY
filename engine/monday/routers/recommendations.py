@@ -60,7 +60,22 @@ def finalize(payload: dict) -> dict:
     if not chosen:
         raise HTTPException(status_code=422,
                             detail="none of the requested symbols are in today's candidates")
+    import pathlib
+
+    from .. import risk
+    from ..ingest import finmind
     from ..pipeline import compose_recommendations    # lazy: keeps app import light
     _, envelope = compose_recommendations(chosen, env["as_of_date"], env["model_version"],
                                           env.get("regime", "neutral"))
+    # §5.7 risk gate — advisory: attach violations for morgan/risk-monitor (never blocks)
+    try:
+        sectors = finmind.fetch_stock_info(settings.finmind_token,
+                                           str(pathlib.Path(settings.data_dir) / "cache"))
+    except Exception:
+        sectors = {}
+    enriched = [{"symbol": p["symbol"], "sector": sectors.get(p["symbol"], "unknown"),
+                 "adv_20d": p.get("adv_20d")} for p in chosen]
+    envelope["risk"] = risk.gate(enriched, max_names=settings.max_recommendations,
+                                 max_per_sector=settings.max_per_sector,
+                                 adv_floor=settings.liquidity_adv_floor)
     return envelope

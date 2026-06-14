@@ -182,8 +182,10 @@ monday/
   operational (launch the swarm with `evva swarm .` and let it run).
 - 🟡 **P2 depth** (branch `p2-depth`): ✅ **regime classifier** (§5.3, `regime.py`) — rule-based label
   (bull_trend / choppy / risk_off / high_vol) from index trend/breadth/vol, stamped on every idea so
-  per-regime attribution is real. ⬜ Next: portfolio risk gate (§5.7), regime-aware ensemble, monthly
-  retrain + factor-decay→retire ADR. New agents (a-tech / risk-monitor / quant-researcher) get activated
+  per-regime attribution is real. ✅ **portfolio risk gate** (§5.7, `risk.py`) — sector-concentration /
+  name-count / liquidity checks (FinMind sector data); advisory on morgan's `/finalize` +
+  `GET /api/portfolio/risk` + a dashboard panel. ⬜ Next: regime-aware ensemble, monthly retrain +
+  factor-decay→retire ADR. New agents (a-tech / risk-monitor / quant-researcher) get activated
   after the P1 live run shows where judgment is most lacking (§7.2 data-driven staging).
 - ⬜ **P3 optimization** (+strategy-researcher, quarterly org review, event-driven adjustments fully on).
 

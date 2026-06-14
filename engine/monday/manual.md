@@ -35,10 +35,13 @@ Base URL: `http://127.0.0.1:7790`
 - `POST /api/recommendations` — commit one finalised idea `{rec_id, symbol, as_of_date, …}`;
   opens its paper position.
 - `POST /api/recommendations/finalize` `{symbols:[…]}` — compose the day's ≤20 book from today's
-  candidates after the analyst overlay (morgan, §5.7); opens positions, returns the envelope.
+  candidates after the analyst overlay (morgan, §5.7); opens positions, returns the envelope
+  (with the `risk` gate result attached — advisory).
 
 ## Portfolio + ledger + calibration
 - `GET /api/portfolio?status=open` — paper positions + summary.
+- `GET /api/portfolio/risk` — §5.7 risk gate on the open book (sector concentration / name count /
+  liquidity); advisory (risk-monitor's read-only patrol).
 - `GET /api/ledger/marks?rec_id=|date=` · `GET /api/ledger/outcomes` — the calibration ledger.
 - `POST /api/ledger/reconcile?source=finmind` — daily mark-to-market of open positions (reviewer-calibrator).
 - `GET /api/calibration` — live scorecard (IC / hit-rate / calibration curve / attribution).

@@ -6,6 +6,7 @@ import Sparkline from '../components/Sparkline.vue'
 
 const pf = ref<any>(null)
 const eq = ref<any[]>([])
+const risk = ref<any>(null)
 const err = ref('')
 const loading = ref(true)
 
@@ -13,6 +14,7 @@ onMounted(async () => {
   try {
     pf.value = await getJSON('/api/portfolio?page_size=200')
     eq.value = await getJSON('/api/portfolio/equity')
+    risk.value = await getJSON('/api/portfolio/risk')
   } catch (e: any) { err.value = String(e.message || e) }
   finally { loading.value = false }
 })
@@ -34,6 +36,19 @@ onMounted(async () => {
     <div class="card">
       <div class="card-h"><h2>Equity curve</h2><span class="dim mono">1 + mean mtm per mark date</span></div>
       <Sparkline :points="eq.map((e) => e.equity)" :baseline="1" />
+    </div>
+    <div class="card" v-if="risk">
+      <div class="card-h">
+        <h2>Risk gate</h2>
+        <span class="badge" :class="risk.passed ? 'long' : 'short'">{{ risk.passed ? 'PASS' : 'FLAGGED' }}</span>
+      </div>
+      <div class="row" style="flex-wrap:wrap">
+        <span v-for="(c, s) in risk.by_sector" :key="s" class="pill">{{ s }} · {{ c }}</span>
+      </div>
+      <ul v-if="risk.violations.length" style="margin:8px 0 0; padding-left:18px; font-size:12.5px">
+        <li v-for="(v, i) in risk.violations" :key="i" class="neg">⚠ {{ v.type }} — {{ v.detail }}</li>
+      </ul>
+      <div v-else class="dim" style="font-size:12px; margin-top:6px">no concentration / liquidity flags</div>
     </div>
     <div class="card">
       <div class="card-h"><h2>Positions</h2><span class="dim mono">{{ pf.total }} total</span></div>
