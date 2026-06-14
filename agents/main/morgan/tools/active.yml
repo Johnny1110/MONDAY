@@ -1,0 +1,9 @@
+# Swarm tools (task_create/assign/update_status/verify, task_list, proposal_list/accept/decline,
+# send_message, list_members, schedule_set/clear, alarm_set/clear, skill_publish, skill) are
+# injected by the LEADER role — do NOT list them. tool_search auto-added when deferr.yml is non-empty.
+- http_request  # operate the engine: GET /api/memory/morgan, /api/signals/today, /api/recommendations*, /api/calibration, /api/portfolio; POST /api/recommendations, /api/reports; PUT /api/memory/morgan
+- todo_write    # plan the multi-step finalize / review (integrate → curate → push → reconcile)
+- calc          # portfolio / position arithmetic — decisions are never mental math
+- web_search    # quick verification of a teammate's claim / breaking news (deep research is delegated)
+- read          # docs/PRD tickets, teammates' memory dirs
+- write         # the strategy constitution + native memory (active: unlocks the memory protocol)

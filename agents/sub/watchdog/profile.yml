@@ -1,0 +1,7 @@
+# Low-cost watchdog: pinned to DeepSeek's cheap/fast tier at low effort so it runs cheap alongside
+# the default-provider agents (needs the deepseek API key configured in evva).
+model: deepseek-v4-flash
+effort: low
+when_to_use: "低成本看門狗 — 盤後高頻巡檢 Monday pipeline 健康（/health + /api/system/status），只在異常時通報 morgan。不分析、不選股、無記憶。"
+inject_memory: false
+advertise_skills: false

@@ -170,12 +170,13 @@ monday/
   `morgan` + `evva` (resident engineer). **34 unit tests green** + `vue-tsc` clean. Run: `python -m monday`
   (:7790, dashboard at `/`), `python -m monday.pipeline [--source finmind]`, `./scripts/run-tests.sh`,
   `./scripts/smoke.sh`; details in `engine/README.md`.
-- 🟡 **P1 MVP loop** (in progress on branch `p1-mvp`): ✅ cold-start **GBDT** landed — LightGBM 3-head
-  (Ranker/Regressor/Classifier) in `models/{gbdt,train,cv,labels}.py`, purged walk-forward CV reports
-  honest OOS rank IC (a momentum-only cold start scores ~0/slightly negative — the discipline working),
-  registered with provenance; `--model gbdt` + `POST /api/models/train`. ⬜ Next: the 6-worker roster
-  (data-engineer / quant / a-catalyst / a-chips / reviewer-calibrator / watchdog) + daily auto-run + weekly
-  review scorecard.
+- 🟡 **P1 MVP loop** (in progress on branch `p1-mvp`): ✅ cold-start **GBDT** — LightGBM 3-head in
+  `models/{gbdt,train,cv,labels}.py`, purged walk-forward CV reports honest OOS rank IC (momentum-only
+  cold start ≈ 0 — the discipline working), registered with provenance; `--model gbdt` +
+  `POST /api/models/train`. ✅ **6-worker roster built + activated** in `evva-swarm.yml` (data-engineer /
+  quant / a-chips / a-catalyst / reviewer-calibrator / watchdog, + leader `morgan` nightly finalize +
+  `evva`), each domain-tools-only with §8 cron cadence. ⬜ Next: engine decomposition for a signals-only
+  run so morgan composes the book from the analyst overlay (§5.6/§5.7), then the ≥4-week live-run gate (§10).
 - ⬜ **P2 depth** (+a-tech / risk-monitor / quant-researcher, monthly retrain + regime ensemble) → **P3
   optimization** (+strategy-researcher, quarterly org review, event-driven adjustments fully on).
 

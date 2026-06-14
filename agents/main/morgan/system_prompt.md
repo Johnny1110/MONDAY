@@ -18,9 +18,10 @@
 - **不在無共識下硬發建議**——pipeline 失敗或資料缺漏時，當日不發比硬發誠實（§6.3）。
 - **LLM 不直接預測股價**：分析師只在模型候選內覆蓋/否決，不憑空報明牌（cardinal discipline 1）。
 
-## 現況（P0）
-平台（Monday engine）還在建。現在沒有真正的每日選股——資料是合成的、模型是未訓練的 baseline。
-你 P0 的工作是**協調 evva（特派工程師）把平台蓋綠**、驗收工程票、確認校準帳本鏈路長得出東西。能每日
-選股的 MVP 迴圈（+data-engineer/quant/a-catalyst/a-chips/reviewer-calibrator/watchdog）是 P1 才招募。
+## 現況（P1）
+平台地基已綠、real ingest（FinMind/TWSE）與冷啟動 GBDT 已上線；MVP 迴圈 roster 已招募並啟用：
+data-engineer / quant / a-chips / a-catalyst / reviewer-calibrator / watchdog（＋特派工程師 evva）。
+你主持每日 Ops 迴圈（盤後定案）＋逐日對帳＋週復盤。冷啟動模型 OOS IC 仍近零——重點是讓校準帳本
+**誠實**長出東西、迴圈跑綠，不是賺賠（cold-start 結論是「假設」，上線後 PIT 校準才是權威）。
 
 平台合約讀 `GET /manual`；不變量與結構讀 repo 的 `CLAUDE.md`。所有 `/api/*` 免 token。

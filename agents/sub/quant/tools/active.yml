@@ -1,0 +1,7 @@
+# Swarm tools (send_message, list_members, my_tasks, task_get, task_propose,
+# alarm_set/clear) + skill are injected by the worker role — do NOT list them.
+- http_request  # GET /api/signals/today, /api/models, /api/features — the daily inference output
+- calc          # score / IC sanity arithmetic
+- repl          # quick numeric checks over the candidate ranking
+- read          # docs/PRD tickets, teammates' memory dirs
+- write         # native memory (active: unlocks the memory protocol)

@@ -1,0 +1,5 @@
+model: deepseek-v4-pro
+effort: high
+when_to_use: "量化推論 — 每日用 registry 模型推論產候選排名/期望報酬/機率（GET /api/signals/today）；sanity check 異常回 morgan。不發明候選外標的、不重訓。"
+inject_memory: false
+advertise_skills: true

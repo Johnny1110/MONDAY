@@ -1,0 +1,5 @@
+model: deepseek-v4-pro
+effort: ultra
+when_to_use: "回歸校準引擎 — 每日對帳 + 算 IC/命中/calibration/歸因，週末產復盤 scorecard 與具體調整提案，POST /api/journal。不選股、不訓模型。"
+inject_memory: false
+advertise_skills: true
