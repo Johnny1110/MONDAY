@@ -39,6 +39,8 @@ python3 -m venv --system-site-packages .venv     # numpy from system; rest insta
 .venv/bin/pip install lightgbm        # macOS also needs OpenMP: `brew install libomp`
 .venv/bin/python -m monday.models.train --source finmind --days 400
 .venv/bin/python -m monday.pipeline --source finmind --model gbdt --days 200
+#   The universe is the top-N listed names by liquidity (config `universe_size`). A WIDE backfill
+#   fires hundreds of FinMind calls — set FINMIND_TOKEN in .env (the free tier 402s past ~hundreds/hr).
 
 # the HTTP service (:7790):
 .venv/bin/python -m monday

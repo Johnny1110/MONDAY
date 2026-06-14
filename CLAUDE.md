@@ -170,7 +170,7 @@ monday/
   `morgan` + `evva` (resident engineer). **34 unit tests green** + `vue-tsc` clean. Run: `python -m monday`
   (:7790, dashboard at `/`), `python -m monday.pipeline [--source finmind]`, `./scripts/run-tests.sh`,
   `./scripts/smoke.sh`; details in `engine/README.md`.
-- 🟡 **P1 MVP loop** (in progress on branch `p1-mvp`): ✅ cold-start **GBDT** — LightGBM 3-head in
+- 🟡 **P1 MVP loop** (merged to `main`; only the live-run gate remains): ✅ cold-start **GBDT** — LightGBM 3-head in
   `models/{gbdt,train,cv,labels}.py`, purged walk-forward CV reports honest OOS rank IC (momentum-only
   cold start ≈ 0 — the discipline working), registered with provenance; `--model gbdt` +
   `POST /api/models/train`. ✅ **6-worker roster built + activated** in `evva-swarm.yml` (data-engineer /
@@ -180,15 +180,18 @@ monday/
   compose the ≤20 book from the analyst overlay (§5.6/§5.7), `POST /api/ledger/reconcile` is
   reviewer-calibrator's daily mark. **44 tests green.** ⬜ Remaining: the ≥4-week live-run gate (§10) —
   operational (launch the swarm with `evva swarm .` and let it run).
-- 🟡 **P2 depth** (branch `p2-depth`): ✅ **regime classifier** (§5.3, `regime.py`) — rule-based label
+- 🟡 **P2 depth** (regime/risk/chips merged to `main`; universe widening on `p2-universe`): ✅ **regime classifier** (§5.3, `regime.py`) — rule-based label
   (bull_trend / choppy / risk_off / high_vol) from index trend/breadth/vol, stamped on every idea so
   per-regime attribution is real. ✅ **portfolio risk gate** (§5.7, `risk.py`) — sector-concentration /
   name-count / liquidity checks (FinMind sector data); advisory on morgan's `/finalize` +
   `GET /api/portfolio/risk` + a dashboard panel. ✅ **chips factor group** (籌碼, §4.3/§5.6) — FinMind
-  三大法人 + 融資券 → net-flow / streak / margin-change factors via `GET /api/chips` (gives a-chips real
-  data). ⬜ Next: fold chips into the GBDT + retrain (does OOS IC improve?), regime-aware ensemble,
-  monthly retrain + factor-decay→retire ADR. New agents (a-tech / risk-monitor / quant-researcher) get activated
-  after the P1 live run shows where judgment is most lacking (§7.2 data-driven staging).
+  三大法人 + 融資券 → net-flow / streak / margin-change factors via `GET /api/chips`, and ✅ **folded into
+  the GBDT** (OOS IC ≈ flat at −0.049 vs momentum-only −0.046 — honestly no edge yet). ✅ **universe widening**
+  (§4.1) — analysable pool = top-N listed names by liquidity via TWSE `STOCK_DAY_ALL` (config `universe_size`,
+  ~800–1000 in prod). **⚠ A wide FinMind history backfill needs a paid token** — the free tier HTTP 402s past
+  ~hundreds of calls/hour (set `FINMIND_TOKEN`). ⬜ Next (need live data + a FinMind token): regime-aware
+  ensemble, monthly retrain + factor-decay→retire ADR. New agents (a-tech / risk-monitor / quant-researcher)
+  get activated after the P1 live run shows where judgment is most lacking (§7.2 data-driven staging).
 - ⬜ **P3 optimization** (+strategy-researcher, quarterly org review, event-driven adjustments fully on).
 
 > **Staffing philosophy**: don't hire the full roster at once (a year of 24/7 tokens is a real cost). Prove the
