@@ -10,8 +10,10 @@ router = APIRouter(prefix="/api/journal", tags=["journal"])
 
 
 @router.get("")
-def list_journal(author: str | None = None, page: int = 1, page_size: int = 50) -> dict:
-    return pagination.paginate(store.list_journal(author), page, page_size)
+def list_journal(author: str | None = None, since: str | None = None,
+                 page: int = 1, page_size: int = 50) -> dict:
+    # author=<name> for one teammate; since=YYYY-MM-DD for the weekly review's window.
+    return pagination.paginate(store.list_journal(author, since), page, page_size)
 
 
 @router.post("")

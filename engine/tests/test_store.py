@@ -52,6 +52,17 @@ class TestStore(unittest.TestCase):
         self.assertEqual(m["factor_set"], ["a", "b"])
         self.assertEqual(m["regime_weights"], {"bull": 1})
 
+    def test_journal_author_and_since_filters(self):
+        # the team work log: each member journals per shift; the weekly review reads a window
+        store.add_journal("old note", author="quant", date="2026-06-01")
+        store.add_journal(" chip note", author="a-chips", date="2026-06-12")
+        store.add_journal("quant note", author="quant", date="2026-06-12")
+        self.assertEqual(len(store.list_journal()), 3)
+        self.assertEqual(len(store.list_journal(author="quant")), 2)          # by teammate
+        self.assertEqual(len(store.list_journal(since="2026-06-08")), 2)      # this week only
+        both = store.list_journal(author="quant", since="2026-06-08")         # composable
+        self.assertEqual([j["body"] for j in both], ["quant note"])
+
 
 if __name__ == "__main__":
     unittest.main()

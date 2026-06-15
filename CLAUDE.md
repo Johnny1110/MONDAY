@@ -178,8 +178,13 @@ monday/
   `evva`), each domain-tools-only with §8 cron cadence. ✅ **human-in-the-loop decomposition** —
   `run-pipeline?finalize=false` prepares signals only, `POST /api/recommendations/finalize` lets morgan
   compose the ≤20 book from the analyst overlay (§5.6/§5.7), `POST /api/ledger/reconcile` is
-  reviewer-calibrator's daily mark. **44 tests green.** ⬜ Remaining: the ≥4-week live-run gate (§10) —
-  operational (launch the swarm with `evva swarm .` and let it run).
+  reviewer-calibrator's daily mark. ✅ **closed-loop wiring** (§6) — **Friday** weekly review (folded into
+  reviewer's reconcile wake; one schedule/member) → `task_propose` → morgan adjudicates (`proposal_*`) and
+  dispatches: engine code → evva (PRD first), new data source/backfill/retrain → data-engineer
+  (`web_search` added), strategy → constitution; every change = an ADR. Every scheduled member journals
+  per shift (`POST /api/journal` author=self; `?since=` filter for the weekly read) + keeps native memory
+  — the lab notebook the review reflects on. **69 tests green.** ⬜ Remaining: the ≥4-week live-run gate
+  (§10) — operational (launch the swarm with `evva swarm .` and let it run).
 - 🟡 **P2 depth** (regime/risk/chips merged to `main`; universe widening on `p2-universe`): ✅ **regime classifier** (§5.3, `regime.py`) — rule-based label
   (bull_trend / choppy / risk_off / high_vol) from index trend/breadth/vol, stamped on every idea so
   per-regime attribution is real. ✅ **portfolio risk gate** (§5.7, `risk.py`) — sector-concentration /

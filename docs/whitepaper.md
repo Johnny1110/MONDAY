@@ -316,7 +316,7 @@ exit_reason(tp|sl|timeout), error = realized_return − predicted_return
 | 迴圈 | 頻率 | 誰主跑 | 做什麼 | 可動到什麼 |
 | --- | --- | --- | --- | --- |
 | **Ops（日）** | 每交易日盤後 | 全隊 | 爬蟲→清洗→特徵→量化排名→LLM 覆蓋→定案 20→推 User→對帳開倉建議 | 當日選股 |
-| **復盤（週）** | 每週六 | reviewer-calibrator → morgan | 跑回歸 scorecard：命中率/IC/calibration/分因子衰減/分析師採納率，產 1–3 條**具體調整提案** | **cheap 調整**：因子權重微調、agent cadence（`schedule_set`）、候選池大小、分析師關注重點 |
+| **復盤（週）** | **每週五**（盤後對帳後） | reviewer-calibrator → morgan | reviewer 跑回歸 scorecard（命中率/IC/calibration/分因子衰減/分析師採納率）+ 讀全隊本週 journal，產 1–3 條**具體提案**（`task_propose`）；morgan 裁決並**派工**（程式→evva、找料補特徵→data-engineer、策略→憲法），每案一條 ADR | **cheap 調整**：因子權重微調、agent cadence（`schedule_set`）、候選池大小、分析師關注重點 |
 | **重校準（月）** | 每月 1 日 | quant-researcher + morgan | 用累積 PIT 快照**重訓模型**、walk-forward 真 OOS 驗證、因子增刪、TP/SL 乘數回歸校正；上月建議全數到期 → 乾淨 OOS scorecard | **模型/策略級**：換模型版本、增/退因子、改 regime 權重、改停利停損公式 |
 | **組織盤整（季）** | 每季 | morgan（+ User） | 結構性檢視：整套方法在賺錢嗎？相對大盤有超額嗎？哪個 agent/子模型沒貢獻？ | **組織級**：增聘/凍結 agent、改 universe、改風格權重、重訂目標 |
 
@@ -363,9 +363,11 @@ exit_reason(tp|sl|timeout), error = realized_return − predicted_return
 - **凍結/暫停**：Web 花名册凍結貢獻度低或燒 token 兇的 agent（被凍結者不再被派任務，解凍即回歸）。
 - **立案深挖**：worker 可 `task_propose` 提議跨多次喚醒的研究課題（如「驗證投信作帳季節性因子」），
   morgan 裁決後上看板、有驗收與留痕。
-- **記憶分兩本**（沿用 Sunday）：**公告板**（morgan 的策略憲法 + researcher 研究日誌，`/api/memory/*`，
-  User 在 dashboard 可讀）+ **私人工作記憶**（evva 原生 `agents/*/<name>/memory/`，每 agent 寫自己的
-  教訓與校準筆記）。
+- **記憶分三本**（前兩本沿用 Sunday）：**公告板**（morgan 的策略憲法 + researcher 研究日誌，`/api/memory/*`，
+  User 在 dashboard 可讀）+ **私人工作記憶**（evva 原生 `agents/*/<name>/memory/`，每 agent 寫自己的教訓與
+  校準筆記，喚醒先讀）+ **團隊工作日誌**（`/api/journal`，每位排程成員每班寫一句、`author` 標記自己；
+  watchdog 只在異常時寫）——這本是週復盤的反思素材，reviewer 以 `?since=<本週一>` 讀整週。**長線運行靠
+  這三本累積，不讓校準心得隨對話視窗消失。**
 
 ---
 
@@ -425,7 +427,7 @@ exit_reason(tp|sl|timeout), error = realized_return − predicted_return
 | `0 23 * * 1-5` | **morgan** | 整合定案 20 檔 → 寫 recommendations + paper-portfolio → 推 User |
 | `0 14 * * 1-5` | reviewer-calibrator | 盤後對帳：開倉建議 mark-to-market、更新 ledger、檢查觸發條件 |
 | `*/15 18-23 * * 1-5` | watchdog | pipeline 健康巡檢（只在異常時通報 morgan）|
-| `0 10 * * 6` | reviewer-calibrator → morgan | **週復盤** scorecard + 調整提案 |
+| `0 14 * * 5`（併入當日對帳喚醒） | reviewer-calibrator → morgan | **週復盤**（每週五）scorecard + `task_propose` 提案；morgan 當日清佇列、裁決派工、留 ADR |
 | `0 9 * * 6` | quant-researcher | 週末重訓/驗證/因子健檢 |
 | `0 10 1 * *` | quant-researcher + morgan | **月重校準**（PIT 重訓 + 乾淨 OOS scorecard）|
 | `0 11 * * 1,3,5` | strategy-researcher | 前瞻找新因子/新 alpha |
@@ -507,7 +509,7 @@ workers:
     budget_tokens: -1
     schedule:
       cron: "0 14 * * 1-5"            # 每日對帳
-      prompt: "逐日對帳開倉建議→更新 ledger→檢查觸發條件；週六另跑復盤 scorecard。"
+      prompt: "逐日對帳開倉建議→更新 ledger→檢查觸發條件；逢週五對帳後加跑週復盤 scorecard + task_propose 提案。"
   - agent: watchdog
     schedule: { cron: "*/15 18-23 * * 1-5", prompt: "pipeline 健康巡檢，只在異常時通報 morgan。" }
   - persona: lab-engineer            # 特派工程師，無 cron，純票/訊息驅動

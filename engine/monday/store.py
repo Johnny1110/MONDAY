@@ -476,13 +476,17 @@ def add_journal(body: str, title: str | None = None, date: str | None = None,
             "SELECT * FROM journal WHERE id = ?", (cur.lastrowid,)).fetchone())
 
 
-def list_journal(author: str | None = None) -> list[dict]:
+def list_journal(author: str | None = None, since: str | None = None) -> list[dict]:
+    # since = inclusive YYYY-MM-DD lower bound on the journal date (the weekly review reads a window).
+    clauses, params = [], []
+    if author:
+        clauses.append("author = ?"); params.append(author)
+    if since:
+        clauses.append("date >= ?"); params.append(since)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     with _LOCK:
-        if author:
-            rows = _db().execute("SELECT * FROM journal WHERE author = ? ORDER BY id DESC",
-                                 (author,)).fetchall()
-        else:
-            rows = _db().execute("SELECT * FROM journal ORDER BY id DESC").fetchall()
+        rows = _db().execute(
+            f"SELECT * FROM journal{where} ORDER BY id DESC", params).fetchall()
         return [dict(r) for r in rows]
 
 

@@ -27,13 +27,18 @@ a-chips / a-catalyst / reviewer-calibrator / watchdog) can only work if the engi
 ## SOP: a ticket's lifecycle
 1. **Take ticket** from morgan (`my_tasks`); tickets reference `docs/PRD/PRD-*.md`. Read the
    ticket + PRD, then the relevant code. Unclear → `send_message` morgan, don't guess.
+   Many tickets are **born from the Friday calibration review** (the loop: ledger → reviewer →
+   morgan → you) — e.g. a new free-data ingest adapter, a new feature, or an engine-behavior change
+   so the model can calibrate against real outcomes. You're the code half of that loop.
 2. **Implement**: confirm no invariant is violated; tests next to code (`engine/tests/test_*.py`);
    conventional commits (`feat`/`fix`/`chore`/`docs`/`refactor`/`test`).
 3. **Verify**: `./scripts/run-tests.sh` all green. Touched the HTTP contract → run the engine and
    `./scripts/smoke.sh`. Pure-logic changes run anywhere; parquet/server changes verify on host.
 4. **Deploy**: commit to `main` → restart per [engine/README.md](engine/README.md)
    (`python -m monday`) → verify `GET /health` 200 + spot-check the changed endpoints → report
-   back to morgan: **ticket # + commit hash + test evidence + restart confirmation**.
+   back to morgan: **ticket # + commit hash + test evidence + restart confirmation**. Then
+   `POST /api/journal` (author=evva) a one-liner — ticket # + commit + what shipped — for the
+   shared lab notebook the Friday review reads.
 5. **Failure path**: `/health` down or smoke fails after deploy → `git revert` the bad commit →
    roll back → report honestly (no glossing). Can't recover → tell morgan to escalate to the User
    via `POST /api/reports`.

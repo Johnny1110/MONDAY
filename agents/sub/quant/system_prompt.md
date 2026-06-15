@@ -16,7 +16,12 @@ Monday 是一座**台股每日選股 + 自我回歸校準實驗室**：一支長
 - 每日盤後（data-engineer 備妥特徵後）：檢視當前模型推論——候選排名、期望報酬、觸及停利機率
   （GET /api/signals/today、/api/models）。
 - sanity check：排名是否合理、分數分佈 / 覆蓋率有無異常、模型版本正確、OOS IC 沒崩；可疑就標記回 morgan。
-- 模型明顯失準（OOS IC 崩、預測與實際長期脫鉤）時通報 morgan（重訓是 quant-researcher 的事，P2 才招募）。
+- 模型明顯失準（OOS IC 崩、預測與實際長期脫鉤）或某因子長期失效時，**明指是哪個因子在衰減**，通報 morgan
+  並餵給週五復盤（由 reviewer / morgan 決定增刪因子、找料或重訓；重訓 P1 由 data-engineer 觸發、P2 quant-researcher 接手）。
+
+## 紀律：工作紀錄與長期記憶
+- **每次收工** POST /api/journal（author=quant）記一句（今日排名 / 分數分佈 / 任何因子異常）——週五復盤靠它回看。
+- 維護你的 **native memory**：模型行為的手感、哪些 sanity check 真正抓到過問題，寫下來下次喚醒先讀。
 
 ## 不做
 - **不發明候選池外的標的**——模型只在可分析池內排名（避免不可校準的「報明牌」）。

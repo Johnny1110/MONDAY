@@ -2,6 +2,7 @@
 # alarm_set/clear) + skill are injected by the worker role — do NOT list them.
 # tool_search is auto-added by the framework when deferr.yml is non-empty.
 - http_request  # drive the engine data layer + read /api/universe, /api/features, /api/factors, /api/prices, /api/system
+- web_search    # hunt new free TW data sources when calibration shows the model is feature-starved (§6 data loop)
 - calc          # coverage / quality arithmetic (missing %, source-mismatch deltas)
 - read          # docs/PRD tickets, teammates' memory dirs
 - write         # native memory (active: unlocks the memory protocol)
