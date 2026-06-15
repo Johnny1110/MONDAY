@@ -4,6 +4,7 @@
 - http_request  # operate the engine: GET /api/memory/morgan, /api/signals/today, /api/recommendations*, /api/calibration, /api/portfolio; POST /api/recommendations, /api/reports; PUT /api/memory/morgan
 - todo_write    # plan the multi-step finalize / review (integrate → curate → push → reconcile)
 - calc          # portfolio / position arithmetic — decisions are never mental math
+- bash          # ad-hoc execution / quick checks; durable code & new APIs go to evva as a PRD
 - web_search    # quick verification of a teammate's claim / breaking news (deep research is delegated)
 - read          # docs/PRD tickets, teammates' memory dirs
 - write         # the strategy constitution + native memory (active: unlocks the memory protocol)

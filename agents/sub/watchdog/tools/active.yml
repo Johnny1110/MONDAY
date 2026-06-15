@@ -1,5 +1,6 @@
 # Swarm tools (send_message, list_members, my_tasks, task_get) + skill are injected by the worker
-# role — do NOT list them. Minimal toolset: two GETs + a snapshot read/write.
+# role — do NOT list them. Minimal toolset: two GETs + a snapshot read/write + ad-hoc bash.
 - http_request  # GET /health + GET /api/system/status (read-only)
+- bash          # ad-hoc checks only; any real coding need → send_message morgan (→ evva), never self-patch
 - read          # the previous health snapshot for comparison
 - write         # persist this run's snapshot to {workdir}/.watchdog-monday.json

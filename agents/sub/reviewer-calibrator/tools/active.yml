@@ -3,5 +3,6 @@
 - http_request  # GET /api/calibration, /api/ledger/*, /api/portfolio; POST /api/calibration/run + /api/journal
 - repl          # python over the ledger: IC / hit-rate / win-loss / attribution beyond what the API returns
 - calc          # one-off arithmetic
+- bash          # ad-hoc execution beyond the repl; durable analysis tooling goes through morgan → evva
 - read          # docs/PRD tickets, teammates' memory dirs
 - write         # native memory (active: unlocks the memory protocol — the review playbook lives there)

@@ -154,6 +154,10 @@ monday/
 - **evva SOP** (resident engineer, the §7.1 lab-engineer role): take ticket (docs/PRD/) → confirm no invariant is violated →
   implement → tests green → commit → deploy and verify health → report back (ticket # + commit hash + test
   evidence). Does not pick stocks, does not touch the strategy constitution.
+- **Coding / execution rule (every agent)**: ad-hoc work (a one-off calc, a throwaway script) → run it with
+  `bash` (all members now hold it). Anything **durable** — a new `/api/*` endpoint or a reusable Python
+  module/script — is raised to **morgan**, who writes a `docs/PRD` ticket for **evva** to build. Don't bury
+  long-lived logic in a one-off hack; route it through the evva loop (testable, committed, maintained).
 
 ## Status / next steps (whitepaper §10 roadmap)
 

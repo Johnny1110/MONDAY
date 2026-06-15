@@ -3,5 +3,6 @@
 - http_request  # GET /api/signals/today, /api/models, /api/features — the daily inference output
 - calc          # score / IC sanity arithmetic
 - repl          # quick numeric checks over the candidate ranking
+- bash          # ad-hoc execution beyond the python repl; durable code goes through morgan → evva
 - read          # docs/PRD tickets, teammates' memory dirs
 - write         # native memory (active: unlocks the memory protocol)

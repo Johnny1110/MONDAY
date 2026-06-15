@@ -4,5 +4,6 @@
 - http_request  # drive the engine data layer + read /api/universe, /api/features, /api/factors, /api/prices, /api/system
 - web_search    # hunt new free TW data sources when calibration shows the model is feature-starved (§6 data loop)
 - calc          # coverage / quality arithmetic (missing %, source-mismatch deltas)
+- bash          # ad-hoc execution; reusable ingest / scripts go through morgan → evva
 - read          # docs/PRD tickets, teammates' memory dirs
 - write         # native memory (active: unlocks the memory protocol)
