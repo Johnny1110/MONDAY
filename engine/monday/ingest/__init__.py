@@ -1,27 +1,22 @@
 """Ingest adapters: pull raw external data, rate-limit, retry, cache (whitepaper §2 platform).
 
-Credentials live in config (engine-side, invariant 1). Three sources behind a uniform registry —
+Credentials live in config (engine-side, invariant 1). Real sources behind a uniform registry —
 ``get_source(name)`` returns a callable ``fetch(days, end_date, cache_dir, token, symbols)`` that
 yields bars in the normalized shape {symbol, name, date, open, high, low, close, volume}:
 
-  * **synthetic** — deterministic, offline, no keys (P0 default; reproducible CI).
-  * **finmind**   — real FinMind TaiwanStockPrice backfill (long history; cold-start workhorse).
-  * **twse**      — real TWSE STOCK_DAY per-month backfill (official listed-board source).
+  * **finmind** — real FinMind TaiwanStockPrice backfill (long history; primary, also serves chips).
+  * **twse**    — real TWSE STOCK_DAY per-month backfill (official listed-board source).
 
 The pipeline selects one via its ``source`` argument; everything downstream (clean → snapshot →
-features → model) is source-agnostic.
+features → model) is source-agnostic. (There is no synthetic/fake source — production runs on real
+market data only; tests inject a recorded real-data fixture.)
 """
 
 from __future__ import annotations
 
 from datetime import date, timedelta
 
-from .synthetic import DEFAULT_SYMBOLS
-from .synthetic import generate as _synth_generate
-
-
-def _synthetic_source(days, end_date=None, cache_dir=None, token="", symbols=None):
-    return _synth_generate(end=end_date, days=days, symbols=symbols)
+from .symbols import DEFAULT_SYMBOLS
 
 
 def _real_universe(symbols, cache_dir):
@@ -56,12 +51,12 @@ def _twse_source(days, end_date=None, cache_dir=None, token="", symbols=None):
     return bars
 
 
-_SOURCES = {"synthetic": _synthetic_source, "finmind": _finmind_source, "twse": _twse_source}
+_SOURCES = {"finmind": _finmind_source, "twse": _twse_source}
 
 
 def get_source(name: str | None):
-    """Return the fetch callable for ``name`` (default 'synthetic'). Raises on unknown source."""
-    src = _SOURCES.get((name or "synthetic").lower())
+    """Return the fetch callable for ``name`` (default 'finmind'). Raises on unknown source."""
+    src = _SOURCES.get((name or "finmind").lower())
     if src is None:
         raise ValueError(f"unknown ingest source: {name!r} (have {sorted(_SOURCES)})")
     return src

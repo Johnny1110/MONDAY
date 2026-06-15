@@ -1,5 +1,5 @@
 model: deepseek-v4-pro
-effort: medium
+effort: ultra
 when_to_use: "資料工程 — 盤後驅動 ingest→清洗→PIT 快照→特徵庫，品質閘巡檢；資料異常通報 morgan。不選股、不訓模型。"
 inject_memory: false
 advertise_skills: true

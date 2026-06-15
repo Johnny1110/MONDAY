@@ -1,5 +1,5 @@
 model: deepseek-v4-pro
-effort: high
+effort: ultra
 when_to_use: "籌碼分析師 — 對候選做三大法人/融資券/主力/作帳覆蓋，評分+理由回 morgan。不選最終名單、不下單。"
 inject_memory: false
 advertise_skills: true

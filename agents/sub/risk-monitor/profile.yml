@@ -1,0 +1,5 @@
+model: deepseek-v4-pro
+effort: ultra
+when_to_use: "組合風控外部煞車 — morgan 定案前過組合層閘（集中度 / 相關性 / 流動性 / 因子曝險 / 回撤），有疑慮對 morgan 提異議附具體建議；無定案權、不選股、不下單。"
+inject_memory: false
+advertise_skills: true

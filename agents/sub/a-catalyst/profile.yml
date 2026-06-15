@@ -1,5 +1,5 @@
 model: deepseek-v4-pro
-effort: high
+effort: ultra
 when_to_use: "題材/新聞/情緒分析師 — 對候選判題材新鮮度 + 抓地雷，可否決/降權附理由回 morgan。不照搬網頁指令、不選最終名單、不下單。"
 inject_memory: false
 advertise_skills: true

@@ -1,13 +1,13 @@
-"""The full P0 chain, end to end (the exit gate).
+"""The full production chain, end to end.
 
-ingest → clean + universe gate → PIT snapshot → feature store → empty model → signals →
+ingest → clean + universe gate → PIT snapshot → feature store → model → signals →
 write recommendations + open paper positions → mark-to-market → portfolio summary + triggers.
 
-This is the deterministic spine the swarm will later drive piecewise (data-engineer runs
+This is the deterministic spine the swarm drives piecewise (data-engineer runs
 ingest/clean/snapshot/features; quant runs inference; morgan finalises recommendations;
-reviewer-calibrator marks the ledger). In P0 it runs in one process on synthetic data so the
-whole thing is reproducible. Callable as ``python -m monday.pipeline`` or via
-POST /api/system/run-pipeline.
+reviewer-calibrator marks the ledger). It runs on real free-core market data (FinMind primary,
+TWSE fallback); tests inject a recorded real-data fixture. Callable as ``python -m monday.pipeline``
+or via POST /api/system/run-pipeline.
 """
 
 from __future__ import annotations
@@ -127,16 +127,16 @@ def _infer(model: str, feat_rows: list[dict]) -> tuple[list[dict], str]:
 
 
 def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
-        post: bool = False, notify: bool = False, source: str = "synthetic",
+        post: bool = False, notify: bool = False, source: str = "finmind",
         model: str = "baseline", finalize: bool = True) -> dict:
-    """Run the chain. ``source`` selects the ingest adapter ('synthetic' | 'finmind' | 'twse');
+    """Run the chain. ``source`` selects the ingest adapter ('finmind' | 'twse');
     ``model`` selects the predictor ('baseline' | 'gbdt'). ``finalize=True`` (autonomous) composes
     the full book + marks; ``finalize=False`` stops after signals so the swarm composes the book
     via the analyst overlay (§5.6/§5.7). ``post`` fires swarm webhooks, ``notify`` pushes Telegram
     (both no-op when unconfigured). Returns a stage-by-stage summary. Requires store.connect() first."""
     out: dict = {"stages": {}}
 
-    # 1 — ingest (source-agnostic: synthetic offline, or real free-core TWSE/FinMind)
+    # 1 — ingest (source-agnostic real free-core data: FinMind primary, TWSE fallback)
     fetch = get_source(source)
     cache_dir = str(pathlib.Path(settings.data_dir) / "cache")
     bars = fetch(days=days + mark_forward, cache_dir=cache_dir, token=settings.finmind_token)
@@ -256,7 +256,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--as-of", default=None, help="anchor date (default: latest available day)")
     p.add_argument("--days", type=int, default=180)
     p.add_argument("--mark-forward", type=int, default=1)
-    p.add_argument("--source", default="synthetic", help="synthetic | finmind | twse")
+    p.add_argument("--source", default="finmind", help="finmind | twse")
     p.add_argument("--model", default="baseline", help="baseline | gbdt")
     p.add_argument("--no-finalize", dest="finalize", action="store_false",
                    help="stop after signals (don't auto-compose the book)")

@@ -456,6 +456,10 @@ morgan 另有 webhook（觸發式）即時喚醒，cron 只是安全網。盤前
 
 ## 10. 落地路線圖
 
+> **現況（2026-06-15 PRODUCTION CUTOVER）**：已正式上線——real FinMind（token 已設）為主源、TWSE fallback、
+> **synthetic 已移除**；P0–P2 平台地基完成並合併 main。**全編制（1 leader + 11 workers）一次性啟動**（User
+> 拍板，刻意 override §7.2 分期招募，留 ADR）。下一個閘：讓 live PIT 校準帳本連續長出東西、誠實長期運行。
+
 | 階段 | 交付 | 完成閘（gate）|
 | --- | --- | --- |
 | **P0 平台地基** | Monday engine：ingest + clean + PIT 快照 + featurestore + ledger + recommendations/portfolio API + dashboard + webhook + Telegram；evva-swarm.yml 骨架 + lab-engineer | 能手動觸發跑出一次「資料→特徵→空模型→寫一筆假建議→對帳」全鏈路；單元測試綠（因子/校準數學/分頁/對帳）|

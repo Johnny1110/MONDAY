@@ -1,15 +1,16 @@
-# Monday engine (P0 scaffold)
+# Monday engine
 
 The platform plane: a stateless TW-equity research platform an evva swarm drives over token-free
 HTTP. See [`../CLAUDE.md`](../CLAUDE.md) for invariants and [`../docs/whitepaper.md`](../docs/whitepaper.md)
-for the spec. P0 runs the **full chain end to end on synthetic data** — not investable.
+for the spec. Runs the **full chain end to end on real free-core TW market data** (FinMind primary,
+TWSE fallback). Paper portfolio only — research opinion, not investment advice.
 
 ## Layout
 ```
 monday/                 package
 ├── config.py           settings (keys engine-side)        store.py    sqlite + RLock + WAL
 ├── pagination.py       list envelope                      parquetio.py PIT/feature parquet (lazy pyarrow)
-├── ingest/           synthetic + twse + finmind adapters  clean.py    quality gate + liquidity filter
+├── ingest/           finmind + twse adapters (+ symbols fallback) clean.py  quality gate + liquidity filter
 │                      (base: cache/rate-limit/retry; parse: ROC dates/numerics; get_source registry)
 ├── snapshot.py         daily PIT snapshot (look-ahead cure) featurestore/ factors (pure) + build
 ├── models/             baseline (empty) + gbdt (LightGBM 3-head) + train/cv/labels  signals.py
@@ -28,11 +29,11 @@ python3 -m venv --system-site-packages .venv     # numpy from system; rest insta
 
 ## Run
 ```bash
-# one full chain offline (synthetic) — the P0 exit gate, prints a stage-by-stage summary:
-.venv/bin/python -m monday.pipeline --days 180
+# one full chain on real data — FinMind primary (needs FINMIND_TOKEN in .env), stage-by-stage summary:
+.venv/bin/python -m monday.pipeline --days 200
 
-# real free-core data — FinMind backfill (long history) or TWSE STOCK_DAY (results cached under data/cache):
-.venv/bin/python -m monday.pipeline --source finmind --days 200
+# or TWSE STOCK_DAY (keyless, prices/universe only — no chips); results cached under data/cache:
+.venv/bin/python -m monday.pipeline --source twse --days 200
 .venv/bin/python -m monday.pipeline --source twse --days 120
 
 # train + register the cold-start GBDT, then run the chain through it (reports OOS rank IC):

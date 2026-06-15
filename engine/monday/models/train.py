@@ -110,7 +110,7 @@ def main(argv: list[str] | None = None) -> None:
     import json
 
     p = argparse.ArgumentParser(description="Train + register the cold-start GBDT model")
-    p.add_argument("--source", default="finmind", help="finmind | twse | synthetic")
+    p.add_argument("--source", default="finmind", help="finmind | twse")
     p.add_argument("--days", type=int, default=400)
     p.add_argument("--horizon", type=int, default=None, help="holding window (default: config)")
     p.add_argument("--tp-pct", type=float, default=0.08)

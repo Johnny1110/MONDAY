@@ -13,8 +13,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # --- data-source credentials (held engine-side; never exposed to agents) -----
-    # Placeholders for P1 ingest. Free core sources (TWSE/TPEx OpenAPI, FinMind, Yahoo)
-    # need no key; CMoney free / some feeds do. Blank in P0 (synthetic source only).
+    # FinMind is the production primary (prices + 法人/margin chips + sector); the token lifts the
+    # free-tier rate limit so a wide universe can backfill. TWSE/TPEx OpenAPI need no key.
     finmind_token: str = ""
     cmoney_user: str = ""
     cmoney_password: str = ""
@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     drawdown_trigger_pct: float = 8.0   # portfolio_drawdown webhook threshold
     max_per_sector: int = 5             # risk gate: ≤N names per industry (§5.7)
     liquidity_adv_floor: float = 0.0    # risk gate: min 20d avg dollar volume (0 = off; universe gate already filters)
-    universe_size: int = 300            # real sources: top-N listed names by liquidity (§4.1; ~800-1000 in prod)
+    universe_size: int = 500            # real sources: top-N listed names by liquidity (§4.1; launch 500, widen to 800-1000)
 
 
 settings = Settings()

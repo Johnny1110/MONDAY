@@ -27,11 +27,11 @@ def status() -> dict:
 
 
 @router.post("/run-pipeline")
-def run_pipeline(days: int = 180, mark_forward: int = 1, source: str = "synthetic",
+def run_pipeline(days: int = 180, mark_forward: int = 1, source: str = "finmind",
                  model: str = "baseline", finalize: bool = True,
                  post: bool = False, notify: bool = False) -> dict:
     """Trigger the chain (ingest → … → signals [→ recommend → mark]). ``source`` selects the ingest
-    adapter ('synthetic' | 'finmind' | 'twse'); ``model`` the predictor ('baseline' | 'gbdt').
+    adapter ('finmind' | 'twse'); ``model`` the predictor ('baseline' | 'gbdt').
     ``finalize=false`` stops after signals so the swarm composes the book (the analysts overlay,
     then POST /api/recommendations/finalize)."""
     from ..pipeline import run                 # lazy: keeps app import light

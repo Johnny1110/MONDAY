@@ -1,0 +1,5 @@
+model: deepseek-v4-pro
+effort: ultra
+when_to_use: "量化 R&D — 重訓 GBDT（purged walk-forward OOS 勝現役才上線）、新因子驗證、regime/DL 試驗、TP/SL 乘數回歸；不碰每日推論、不選股、不靠樣本內數字上線。"
+inject_memory: false
+advertise_skills: true

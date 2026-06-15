@@ -1,0 +1,5 @@
+model: deepseek-v4-pro
+effort: ultra
+when_to_use: "技術分析師 — 對 quant 候選做技術面覆蓋（趨勢結構 / 動能 / 量價 / 關鍵價位 / 型態），逐檔評分與進場區間+停損參考回 morgan。不選最終名單、不下單、不碰候選池外標的。"
+inject_memory: false
+advertise_skills: true

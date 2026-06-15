@@ -1,6 +1,6 @@
 # Monday — Claude Code Development Guide
 
-> **Status (2026-06-13): Phase 0, platform not yet started.** The repo currently holds only the whitepaper.
+> **Status (2026-06-15): PRODUCTION — live on real FinMind data, full 11-worker roster activated, synthetic removed.**
 > Authoritative spec = **[docs/whitepaper.md](docs/whitepaper.md) (v0.1, in Chinese)** — all design detail,
 > `§` numbering, and the DDL/JSON contracts live there; this file is the **distilled working guide** loaded
 > every session (invariants + structure + disciplines). **All names are placeholders** (project Monday /
@@ -162,11 +162,17 @@ monday/
 ## Status / next steps (whitepaper §10 roadmap)
 
 - ✅ Whitepaper v0.1 (`docs/whitepaper.md`); the four architecture decisions are locked (§0.1).
-- ⬜ **Awaiting User sign-off on §11** (naming / cold-start history depth / universe scope / long-only vs
-  short / repo location / Telegram).
+- ✅ **PRODUCTION CUTOVER (2026-06-15)** — live on **real FinMind** (token set; prices + 法人/margin chips +
+  sector) + TWSE fallback; **synthetic removed entirely** (tests/smoke run on a committed real-data fixture
+  `tests/fixtures/tw_sample.json`). **Full 11-worker roster activated** (+a-tech / risk-monitor /
+  quant-researcher / strategy-researcher); retrain → quant-researcher, pre-finalize risk gate → risk-monitor.
+  `universe_size=500` (widen to 800–1000). Launch: `FINMIND_TOKEN` in `engine/.env` → backfill → train GBDT →
+  `evva swarm .`.
+- ⬜ **§11 still open** (naming / cold-start history depth / long-only vs short / repo location / Telegram);
+  universe scope + roster are now settled by the cutover.
 - ✅ **P0 platform foundation — COMPLETE.** `engine/monday/` runs the full chain (ingest → clean +
   universe gate → PIT snapshot → featurestore → empty baseline model → ≤20 recommendations →
-  mark-to-market) on **synthetic OR real free-core data** — `--source finmind|twse` pulls live TW prices
+  mark-to-market) on **real free-core data** — `--source finmind|twse` pulls live TW prices
   through a cached, rate-limited, retrying ingest layer; idempotent re-runs. 17 token-free routers +
   `/manual`; sqlite (appendix B schema) + parquet. **Vue 3 + TS dashboard** (Today / Signals / Portfolio /
   Calibration / Ledger / Reports / System / Manual; black-gold, SVG equity curve + calibration reliability
@@ -197,12 +203,15 @@ monday/
   三大法人 + 融資券 → net-flow / streak / margin-change factors via `GET /api/chips`, and ✅ **folded into
   the GBDT** (OOS IC ≈ flat at −0.049 vs momentum-only −0.046 — honestly no edge yet). ✅ **universe widening**
   (§4.1) — analysable pool = top-N listed names by liquidity via TWSE `STOCK_DAY_ALL` (config `universe_size`,
-  ~800–1000 in prod). **⚠ A wide FinMind history backfill needs a paid token** — the free tier HTTP 402s past
-  ~hundreds of calls/hour (set `FINMIND_TOKEN`). ⬜ Next (need live data + a FinMind token): regime-aware
-  ensemble, monthly retrain + factor-decay→retire ADR. New agents (a-tech / risk-monitor / quant-researcher)
-  get activated after the P1 live run shows where judgment is most lacking (§7.2 data-driven staging).
-- ⬜ **P3 optimization** (+strategy-researcher, quarterly org review, event-driven adjustments fully on).
+  ~800–1000 in prod). **FinMind token is set** (production); the wide backfill is resumable via cache (402
+  mid-run → re-run until complete). ⬜ Next: regime-aware ensemble, monthly retrain + factor-decay→retire ADR.
+  **All deferred agents (a-tech / risk-monitor / quant-researcher / strategy-researcher) were activated at the
+  2026-06-15 production cutover** at the User's direction (overriding §7.2 staged hiring; recorded as an ADR).
+- 🟡 **P3 optimization** — strategy-researcher activated (2026-06-15); quarterly org review + event-driven
+  adjustments now in scope as the live loop runs.
 
 > **Staffing philosophy**: don't hire the full roster at once (a year of 24/7 tokens is a real cost). Prove the
 > **closed loop** with a minimal roster first, then let the calibration ledger reveal "where judgment is most
 > lacking" to differentiate roles — **letting the org evolve data-driven** is itself an expression of §6.
+> **(2026-06-15: the User elected to activate the full roster at the production cutover, overriding this staged
+> default — recorded as a cutover ADR. The calibration ledger will now reveal which roles earn their keep.)**

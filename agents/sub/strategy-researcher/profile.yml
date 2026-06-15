@@ -1,0 +1,5 @@
+model: deepseek-v4-pro
+effort: ultra
+when_to_use: "前瞻策略研究 — 找新 alpha / 新資料源 / 市場結構性變化（制度、資金潮、題材輪動、新型資料），寫成可驗證假設交 morgan / quant-researcher；不做每日選股、不自行宣稱因子有效、不下單。"
+inject_memory: false
+advertise_skills: true

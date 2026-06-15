@@ -4,19 +4,19 @@ You drive Monday over plain HTTP. **Every endpoint is token-free** — the platf
 data-source keys; you hold only HTTP (invariants 1–2). List endpoints return the uniform
 envelope `{items, page, page_size, total, has_more}` (invariant 3); pass `?page=&page_size=`.
 
-This is the **P0 scaffold**: data defaults to synthetic (NOT investable), but real free-core
-sources (**FinMind**, **TWSE**) are selectable via `?source=`. The model is an untrained baseline
-momentum ranker, and the news/sentiment feeds are stubs. The *contract shape* below is stable;
-the *content* gets fully real in P1.
+**Production**: data is real free-core market data — **FinMind** primary (prices + 法人/margin chips +
+sector), **TWSE** fallback — selected via `?source=` (default `finmind`). The model is a GBDT trained on
+accumulated PIT data (a baseline momentum ranker is the fallback). News/sentiment feeds are still being
+wired. There is no synthetic/fake source — paper portfolio only, research opinion not investment advice.
 
 Base URL: `http://127.0.0.1:7790`
 
 ## System
 - `GET /health` — liveness ping.
 - `GET /api/system/status` — versions, last pipeline day, counts.
-- `POST /api/system/run-pipeline?source=synthetic&model=baseline&finalize=true&days=180` — run the
+- `POST /api/system/run-pipeline?source=finmind&model=gbdt&finalize=true&days=180` — run the
   chain (ingest → clean → PIT snapshot → features → model → signals [→ recommend → mark]). `source` ∈
-  {`synthetic`,`finmind`,`twse`}; `model` ∈ {`baseline`,`gbdt`}; **`finalize=false` stops after signals**
+  {`finmind`,`twse`}; `model` ∈ {`baseline`,`gbdt`}; **`finalize=false` stops after signals**
   (the swarm composes the book); `post`/`notify` fire swarm webhooks / Telegram.
 
 ## Data plane (read)

@@ -1,0 +1,9 @@
+# Swarm tools (send_message, list_members, my_tasks, task_get, task_propose,
+# alarm_set/clear) + skill are injected by the worker role — do NOT list them.
+- http_request  # POST /api/models/train; GET /api/models, /api/calibration, /api/features — train + validate
+- repl          # CV experiments / factor IC over the feature panel
+- bash          # training runs, walk-forward CV scripts (the heavy compute lives here)
+- calc          # one-off arithmetic
+- web_search    # factor / method research (papers, prior art) — validate before proposing
+- read          # docs/PRD tickets, teammates' memory dirs
+- write         # native memory (active: unlocks the memory protocol — research notebook)

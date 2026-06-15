@@ -10,7 +10,7 @@ const err = ref('')
 const running = ref(false)
 const result = ref<any>(null)
 const days = ref(180)
-const source = ref('synthetic')
+const source = ref('finmind')
 
 async function load() {
   status.value = await getJSON('/api/system/status')
@@ -33,7 +33,7 @@ onMounted(load)
     <div class="card-h"><h2>Run pipeline</h2><span class="dim mono">one full chain → writes recs + marks</span></div>
     <div class="row">
       <label class="dim">source</label>
-      <select v-model="source"><option>synthetic</option><option>finmind</option><option>twse</option></select>
+      <select v-model="source"><option>finmind</option><option>twse</option></select>
       <label class="dim">days</label>
       <input v-model.number="days" type="number" style="width:88px" />
       <button class="gold" :disabled="running" @click="run">{{ running ? 'running…' : 'Run pipeline' }}</button>
