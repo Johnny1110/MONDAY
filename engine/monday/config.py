@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     max_per_sector: int = 5             # risk gate: ≤N names per industry (§5.7)
     liquidity_adv_floor: float = 0.0    # risk gate: min 20d avg dollar volume (0 = off; universe gate already filters)
     universe_size: int = 500            # real sources: top-N listed names by liquidity (§4.1; launch 500, widen to 800-1000)
+    ingest_max_workers: int = 8         # concurrent FinMind fetches for the daily universe pull (politely bounds throughput)
 
 
 settings = Settings()

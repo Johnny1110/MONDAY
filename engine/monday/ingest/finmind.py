@@ -8,9 +8,55 @@ engine-side, never exposed to agents (invariant 2). Parser is pure (tested); fet
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date, timedelta
+
 from . import base
 
 API = "https://api.finmindtrade.com/api/v4/data"
+
+
+def _anchor_start(as_of, lookback_days: int) -> str:
+    """Month-quantized lower bound (first of the month, ``lookback_days`` before ``as_of``). Anchoring
+    to the month keeps each symbol's cache key STABLE across daily runs — the old sliding start/end
+    changed the key every day, forcing a full cold re-fetch of the whole universe on every run."""
+    d = (as_of if isinstance(as_of, date) else date.fromisoformat(str(as_of))) - timedelta(days=lookback_days)
+    return date(d.year, d.month, 1).isoformat()
+
+
+def _bulk(items, work, label: str):
+    """Run ``work(item)`` concurrently; stop + return partial on the first RateLimitError (quota).
+    Cached items short-circuit inside ``work`` (no network), so a re-run after a partial pull resumes.
+    Returns the list of results (one per completed item)."""
+    from ..config import settings
+    results, hit = [], False
+    with ThreadPoolExecutor(max_workers=max(1, settings.ingest_max_workers)) as ex:
+        futs = {ex.submit(work, it): it for it in items}
+        for fut in as_completed(futs):
+            try:
+                results.append(fut.result())
+            except base.RateLimitError:
+                hit = True
+                for f in futs:
+                    f.cancel()
+    if hit:
+        base.log.warning("FinMind rate limit hit — %s partial: %d/%d (re-run to resume from cache)",
+                         label, len(results), len(items))
+    return results
+
+
+def fetch_universe_prices(symbols, as_of, lookback_days: int, token: str = "",
+                          cache_dir: str | None = None) -> list[dict]:
+    """Concurrent daily-price pull for the whole universe (the daily-ingest hot path). Month-anchored
+    cache (stable key) + thread pool + graceful partial on quota — replaces the serial per-symbol loop
+    that took >15 min and timed out. ``symbols`` is a list of (code, name)."""
+    start = _anchor_start(as_of, lookback_days)
+    per_symbol = _bulk(
+        symbols,
+        lambda it: fetch_price(it[0], start, None, token=token, name=it[1],
+                               cache_dir=cache_dir, min_interval=0.0),
+        "prices")
+    return [bar for bars in per_symbol for bar in bars]
 
 
 def parse_price(payload: dict | None, name: str | None = None) -> list[dict]:
@@ -33,15 +79,16 @@ def parse_price(payload: dict | None, name: str | None = None) -> list[dict]:
 
 
 def fetch_price(symbol: str, start, end=None, token: str = "", name: str | None = None,
-                cache_dir: str | None = None, ttl: float = 43200) -> list[dict]:
-    """Daily bars for ``symbol`` over [start, end] (ISO dates or date objects)."""
+                cache_dir: str | None = None, ttl: float = 21600, min_interval: float = 0.6) -> list[dict]:
+    """Daily bars for ``symbol`` over [start, end] (ISO dates or date objects). The concurrent universe
+    pull passes ``min_interval=0`` (pool size bounds throughput instead of a per-call serial wait)."""
     params = {"dataset": "TaiwanStockPrice", "data_id": symbol, "start_date": str(start)}
     if end:
         params["end_date"] = str(end)
     if token:
         params["token"] = token
     payload = base.fetch_json(API, params, cache_dir=cache_dir, ttl=ttl,
-                              rate_key="finmind", min_interval=0.6)
+                              rate_key="finmind", min_interval=min_interval)
     return parse_price(payload, name)
 
 
@@ -120,30 +167,33 @@ def parse_margin(payload: dict | None) -> list[dict]:
     return sorted(out, key=lambda x: x["date"])
 
 
-def _chip_fetch(dataset: str, symbol: str, start, end, token, cache_dir, ttl):
+def _chip_fetch(dataset: str, symbol: str, start, end, token, cache_dir, ttl, min_interval=0.6):
     params = {"dataset": dataset, "data_id": symbol, "start_date": str(start)}
     if end:
         params["end_date"] = str(end)
     if token:
         params["token"] = token
     return base.fetch_json(API, params, cache_dir=cache_dir, ttl=ttl,
-                           rate_key="finmind", min_interval=0.6)
+                           rate_key="finmind", min_interval=min_interval)
 
 
-def fetch_institutional(symbol: str, start, end=None, token: str = "",
-                        cache_dir: str | None = None, ttl: float = 43200) -> list[dict]:
+def fetch_institutional(symbol: str, start, end=None, token: str = "", cache_dir: str | None = None,
+                        ttl: float = 21600, min_interval: float = 0.6) -> list[dict]:
     return parse_institutional(_chip_fetch("TaiwanStockInstitutionalInvestorsBuySell",
-                                           symbol, start, end, token, cache_dir, ttl))
+                                           symbol, start, end, token, cache_dir, ttl, min_interval))
 
 
-def fetch_margin(symbol: str, start, end=None, token: str = "",
-                 cache_dir: str | None = None, ttl: float = 43200) -> list[dict]:
+def fetch_margin(symbol: str, start, end=None, token: str = "", cache_dir: str | None = None,
+                 ttl: float = 21600, min_interval: float = 0.6) -> list[dict]:
     return parse_margin(_chip_fetch("TaiwanStockMarginPurchaseShortSale",
-                                    symbol, start, end, token, cache_dir, ttl))
+                                    symbol, start, end, token, cache_dir, ttl, min_interval))
 
 
 def fetch_chips(symbols, start, end=None, token: str = "",
                 cache_dir: str | None = None) -> dict[str, dict]:
-    """{symbol: {inst, margin}} for the universe — the chip series the feature build enriches with."""
-    return {s: {"inst": fetch_institutional(s, start, end, token, cache_dir),
-                "margin": fetch_margin(s, start, end, token, cache_dir)} for s in symbols}
+    """{symbol: {inst, margin}} for the universe — concurrent, month-anchored cache, graceful partial
+    on quota (the enrich step tolerates missing symbols). Two calls per symbol (法人 + 融資券)."""
+    def one(s):
+        return s, {"inst": fetch_institutional(s, start, end, token, cache_dir, min_interval=0.0),
+                   "margin": fetch_margin(s, start, end, token, cache_dir, min_interval=0.0)}
+    return dict(_bulk(list(symbols), one, "chips"))

@@ -1,0 +1,12 @@
+[
+  {
+    "id": "alm_l70agalf",
+    "fire_at": "2026-06-16T08:00:00+08:00",
+    "prompt": "Re-check /api/chips for all 27 candidates from Task #4 (2026-06-15 signals). FinMind daily quota was exhausted on 6/15 (402). Try /api/chips?symbol=2330\u0026as_of=2026-06-15 first — if it works, fetch all 27 candidates and complete the chips overlay analysis. Then send results to morgan. If still 402/500, report to morgan that chips data remains unavailable.",
+    "label": "Re-check FinMind chips quota",
+    "durable": true,
+    "created": "2026-06-15T23:12:41.49874+08:00",
+    "target": "a-chips",
+    "origin": "a-chips"
+  }
+]

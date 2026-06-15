@@ -15,6 +15,7 @@ import hashlib
 import json
 import logging
 import pathlib
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -23,6 +24,12 @@ import urllib.request
 log = logging.getLogger("monday.ingest")
 
 _last_call: dict[str, float] = {}   # rate_key → last wall-clock call time
+_rate_lock = threading.Lock()       # guards _last_call for concurrent fetches
+
+
+class RateLimitError(RuntimeError):
+    """Raised on HTTP 402/429 (source quota hit) — retrying in-run won't help, so callers
+    should stop and degrade gracefully (e.g. proceed with the partial universe)."""
 
 
 def _cache_path(cache_dir: str, url: str, params: dict | None) -> pathlib.Path:
@@ -50,12 +57,16 @@ def _write_cache(path: pathlib.Path, data) -> None:
 
 
 def _rate_limit(rate_key: str | None, min_interval: float) -> None:
-    if not rate_key:
+    # Thread-safe global spacing per rate_key. Concurrent callers pass min_interval=0 and bound
+    # throughput via their thread-pool size instead (the per-call serial wait is the bottleneck
+    # that made a full-universe pull take >15 min).
+    if not rate_key or min_interval <= 0:
         return
-    wait = min_interval - (time.time() - _last_call.get(rate_key, 0.0))
-    if wait > 0:
-        time.sleep(wait)
-    _last_call[rate_key] = time.time()
+    with _rate_lock:
+        wait = min_interval - (time.time() - _last_call.get(rate_key, 0.0))
+        if wait > 0:
+            time.sleep(wait)
+        _last_call[rate_key] = time.time()
 
 
 def fetch_json(url: str, params: dict | None = None, *, cache_dir: str | None = None,
@@ -79,6 +90,12 @@ def fetch_json(url: str, params: dict | None = None, *, cache_dir: str | None = 
             if cache_file is not None:
                 _write_cache(cache_file, data)
             return data
+        except urllib.error.HTTPError as e:
+            if e.code in (402, 429):             # source quota / rate limit — in-run retry is futile
+                raise RateLimitError(f"{url}: HTTP {e.code} (rate limit / quota)") from e
+            err = e
+            log.warning("ingest fetch %s failed (attempt %d/%d): %s", url, attempt + 1, retries, e)
+            time.sleep(0.8 * (attempt + 1))
         except (urllib.error.URLError, ValueError, TimeoutError, OSError) as e:
             err = e
             log.warning("ingest fetch %s failed (attempt %d/%d): %s", url, attempt + 1, retries, e)

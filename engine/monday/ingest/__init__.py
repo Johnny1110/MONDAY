@@ -14,7 +14,7 @@ market data only; tests inject a recorded real-data fixture.)
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 
 from .symbols import DEFAULT_SYMBOLS
 
@@ -32,12 +32,10 @@ def _real_universe(symbols, cache_dir):
 def _finmind_source(days, end_date=None, cache_dir=None, token="", symbols=None):
     from . import finmind
     symbols = _real_universe(symbols, cache_dir)
-    end = end_date or date.today()
-    start = end - timedelta(days=int(days * 1.7) + 20)   # calendar span → ~days trading rows
-    bars: list[dict] = []
-    for code, name in symbols:
-        bars += finmind.fetch_price(code, start, end, token=token, name=name, cache_dir=cache_dir)
-    return bars
+    as_of = end_date or date.today()
+    lookback = int(days * 1.7) + 20                       # calendar span → ~days trading rows
+    # Concurrent, month-anchored, quota-graceful (replaces the serial loop that timed out).
+    return finmind.fetch_universe_prices(symbols, as_of, lookback, token=token, cache_dir=cache_dir)
 
 
 def _twse_source(days, end_date=None, cache_dir=None, token="", symbols=None):

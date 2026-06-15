@@ -97,15 +97,14 @@ def _equity_curve() -> list[float]:
 
 
 def _enrich_chips(rows: list[dict], as_of: str, cache_dir: str) -> None:
-    """Merge chip factors (§5.6) into feature rows in place (FinMind source only)."""
-    from datetime import date, timedelta
-
+    """Merge chip factors (§5.6) into feature rows in place (FinMind source only). Concurrent +
+    month-anchored cache; chip_factors clips each series to <= as_of, so the through-latest fetch
+    stays PIT-safe (no look-ahead)."""
     from .featurestore import chips
     from .ingest import finmind
     syms = sorted({r["symbol"] for r in rows})
-    start = (date.fromisoformat(as_of) - timedelta(days=60)).isoformat()
-    chips.enrich_rows(rows, finmind.fetch_chips(syms, start, as_of,
-                                                settings.finmind_token, cache_dir))
+    start = finmind._anchor_start(as_of, 90)        # month-anchored ≥60d lookback → stable cache key
+    chips.enrich_rows(rows, finmind.fetch_chips(syms, start, None, settings.finmind_token, cache_dir))
 
 
 def _infer(model: str, feat_rows: list[dict]) -> tuple[list[dict], str]:
@@ -235,14 +234,18 @@ def reconcile(as_of: str | None = None, source: str = "finmind", days: int = 30)
     """Daily mark-to-market of all OPEN positions against the latest available prices
     (reviewer-calibrator's daily duty, §6.1). Standalone — writes no new recommendations.
     Requires store.connect() first."""
-    fetch = get_source(source)
     cache_dir = str(pathlib.Path(settings.data_dir) / "cache")
-    bars = fetch(days=days, cache_dir=cache_dir, token=settings.finmind_token)
+    syms = sorted({p["symbol"] for p in store.list_positions(status="open")})
+    if not syms:                                   # nothing to mark — don't pull the universe for nothing
+        return {"mark_date": as_of, "marked": 0, "settled": 0, "portfolio": portfolio.summary()}
+    # fetch prices ONLY for open positions (a handful), not the whole universe (quota + speed)
+    fetch = get_source(source)
+    bars = fetch(days=days, cache_dir=cache_dir, token=settings.finmind_token,
+                 symbols=[(s, s) for s in syms])
     if not bars:
-        raise RuntimeError(f"ingest source {source!r} returned no bars")
+        raise RuntimeError(f"ingest source {source!r} returned no bars for open positions")
     bar_idx = {(b["symbol"], b["date"]): b for b in bars}
     mark_date = as_of or max(b["date"] for b in bars)
-    syms = {p["symbol"] for p in store.list_positions(status="open")}
     lookup = {s: bar_idx[(s, mark_date)] for s in syms if (s, mark_date) in bar_idx}
     res = portfolio.mark_positions(mark_date, lookup, settings.holding_window_days)
     store.kv_set("last_reconcile", mark_date)
