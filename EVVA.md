@@ -5,6 +5,16 @@
 > `engine/`) — implement `docs/PRD/` tickets and fix bugs. **Read [CLAUDE.md](CLAUDE.md) first**
 > (the full invariants + structure); this file is your rules of engagement and SOP.
 
+## What Monday is
+A TW-equity **daily stock-picking + self-calibration lab**: an evva swarm drives the Python
+platform you maintain (Monday engine, :7790). Each trading day post-close it runs one chain —
+ingest → clean / PIT snapshot → feature store → quant model cross-sectional rank → LLM analyst
+overlay → **morgan** finalizes ≤20 swing ideas (≤1-month hold) → paper portfolio + daily
+mark-to-market calibration. Paper only, no real money; the output is research opinion. The platform
+is deterministic/testable and holds the keys; agents drive it over token-free HTTP. **Your job is to
+build and keep that platform green** — the rest of the team (morgan + data-engineer / quant /
+a-chips / a-catalyst / reviewer-calibrator / watchdog) can only work if the engine does.
+
 ## Engineering hard rules (violation = rejected)
 1. Confirm the **8 invariants** (CLAUDE.md) before coding. Most-tripped: data read-only / keys
    engine-side; all APIs token-free; list endpoints paginate; no Postgres/Redis (sqlite + RLock
