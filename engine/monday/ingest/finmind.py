@@ -197,3 +197,41 @@ def fetch_chips(symbols, start, end=None, token: str = "",
         return s, {"inst": fetch_institutional(s, start, end, token, cache_dir, min_interval=0.0),
                    "margin": fetch_margin(s, start, end, token, cache_dir, min_interval=0.0)}
     return dict(_bulk(list(symbols), one, "chips"))
+
+
+# ── TaiwanStockBalanceSheet (§4.3 基本面) ──────────────────────────────────
+# Quarterly IFRS balance-sheet items. FinMind returns one row per (stock_id, date, type)
+# with a float64 ``value`` and ``origin_name`` (Chinese label). The parser normalises
+# to a compact [{date, stock_id, type, value}] list. Cache TTL is 7 days — quarterly
+# filings don't change intra-week.
+
+def parse_balance_sheet(payload: dict | None) -> list[dict]:
+    """TaiwanStockBalanceSheet JSON → [{date, stock_id, type, value}], ascending by date."""
+    if not payload or payload.get("status") != 200:
+        return []
+    rows = []
+    for r in payload.get("data") or []:
+        try:
+            rows.append({"date": r["date"], "stock_id": str(r["stock_id"]),
+                         "type": r["type"], "value": float(r["value"])})
+        except (KeyError, TypeError, ValueError):
+            continue
+    return sorted(rows, key=lambda x: x["date"])
+
+
+def fetch_balance_sheet(symbol: str, start, end=None, token: str = "",
+                        cache_dir: str | None = None,
+                        ttl: float = 604800, min_interval: float = 0.6) -> list[dict]:
+    """Quarterly balance-sheet rows for ``symbol``. Returns [{date, stock_id, type, value}]."""
+    return parse_balance_sheet(
+        _chip_fetch("TaiwanStockBalanceSheet", symbol, start, end, token, cache_dir, ttl,
+                    min_interval))
+
+
+def fetch_balance_sheets(symbols, start, end=None, token: str = "",
+                         cache_dir: str | None = None) -> dict[str, list[dict]]:
+    """{symbol: [balance-sheet rows]} for the universe — concurrent, month-anchored cache,
+    graceful partial on quota."""
+    def one(s):
+        return s, fetch_balance_sheet(s, start, end, token, cache_dir, min_interval=0.0)
+    return dict(_bulk(list(symbols), one, "balance_sheets"))

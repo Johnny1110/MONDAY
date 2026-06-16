@@ -78,6 +78,53 @@ class TestFinMind(unittest.TestCase):
     def test_parse_price_bad_status(self):
         self.assertEqual(finmind.parse_price({"status": 402, "msg": "limit"}), [])
 
+    def test_parse_balance_sheet_none(self):
+        self.assertEqual(finmind.parse_balance_sheet(None), [])
+
+    def test_parse_balance_sheet_bad_status(self):
+        self.assertEqual(finmind.parse_balance_sheet({"status": 402, "msg": "limit"}), [])
+
+    def test_parse_balance_sheet_empty_data(self):
+        self.assertEqual(finmind.parse_balance_sheet({"status": 200, "data": []}), [])
+
+    def test_parse_balance_sheet(self):
+        payload = {"status": 200, "data": [
+            {"date": "2025-12-31", "stock_id": "2330", "type": "CurrentContractLiabilities",
+             "value": 123456789.0, "origin_name": "流動合約負債"},
+            {"date": "2025-09-30", "stock_id": "2330", "type": "CurrentContractLiabilities",
+             "value": 98765432.0, "origin_name": "流動合約負債"},
+            {"date": "2025-09-30", "stock_id": "2330", "type": "TotalAssets",
+             "value": 5000000000.0, "origin_name": "資產總計"},
+        ]}
+        rows = finmind.parse_balance_sheet(payload)
+        self.assertEqual(len(rows), 3)
+        # sorted by date ascending
+        self.assertEqual(rows[0]["date"], "2025-09-30")
+        self.assertEqual(rows[1]["date"], "2025-09-30")
+        self.assertEqual(rows[2]["date"], "2025-12-31")
+        # values parsed as float
+        self.assertIsInstance(rows[0]["value"], float)
+        self.assertEqual(rows[0]["value"], 98765432.0)
+        self.assertEqual(rows[2]["value"], 123456789.0)
+        # stock_id is str
+        self.assertEqual(rows[0]["stock_id"], "2330")
+        # type preserved
+        self.assertEqual(rows[0]["type"], "CurrentContractLiabilities")
+
+    def test_parse_balance_sheet_skips_bad_rows(self):
+        payload = {"status": 200, "data": [
+            {"date": "2025-12-31", "stock_id": "2330", "type": "Cash",
+             "value": "not-a-number", "origin_name": "現金"},
+            {"date": "2025-09-30", "stock_id": "2330", "type": "Cash", "value": 100.0,
+             "origin_name": "現金"},
+            # missing type
+            {"date": "2025-06-30", "stock_id": "2330", "value": 200.0,
+             "origin_name": "無"},
+        ]}
+        rows = finmind.parse_balance_sheet(payload)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["value"], 100.0)
+
 
 if __name__ == "__main__":
     unittest.main()
