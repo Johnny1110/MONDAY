@@ -1,0 +1,36 @@
+# Monday engine — reproducible install list for running + testing the engine.
+# pyproject.toml stays the packaging source of truth; this file is the flat,
+# pip-installable set that brings up a working env in one shot:
+#
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+#
+# Verified on Python 3.14.3 / macOS arm64 (2026-06-16):
+#   psycopg-binary 3.3.4 · psycopg-pool 3.3.1 · pandas 3.0.3 · pyarrow 24.0.0
+#   lightgbm 4.6.0 · scikit-learn 1.9.0 · shap 0.52.0 · fastapi 0.136.3
+#
+# NOTE the store needs libpq. We pin psycopg[binary] (libpq bundled in the wheel)
+# so NO system libpq / `brew install libpq` is required. Plain `psycopg` will fail
+# at import with "no pq wrapper available" — that is the #1 boot gotcha (see RUNBOOK).
+
+# --- web / server ---
+fastapi
+uvicorn
+pydantic-settings
+
+# --- transactional store: PostgreSQL (invariant 5). [binary] bundles libpq. ---
+psycopg[binary]>=3.1
+psycopg-pool
+
+# --- numerics / parquet (large feature & price tables) ---
+numpy
+pandas
+pyarrow
+
+# --- ML: GBDT 3-head (Ranker/Regressor/Classifier) + SHAP attribution.
+#     lightgbm needs OpenMP at runtime → macOS: `brew install libomp`. ---
+lightgbm
+scikit-learn
+shap
+
+# --- tests ---
+pytest

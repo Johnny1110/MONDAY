@@ -8,7 +8,7 @@ TWSE fallback). Paper portfolio only — research opinion, not investment advice
 ## Layout
 ```
 monday/                 package
-├── config.py           settings (keys engine-side)        store.py    sqlite + RLock + WAL
+├── config.py           settings (keys engine-side)        store.py    PostgreSQL (psycopg pool)
 ├── pagination.py       list envelope                      parquetio.py PIT/feature parquet (lazy pyarrow)
 ├── ingest/           finmind + twse adapters (+ symbols fallback) clean.py  quality gate + liquidity filter
 │                      (base: cache/rate-limit/retry; parse: ROC dates/numerics; get_source registry)
@@ -23,9 +23,11 @@ monday/                 package
 
 ## Setup
 ```bash
-python3 -m venv --system-site-packages .venv     # numpy from system; rest installed below
-.venv/bin/pip install fastapi uvicorn pydantic-settings pyarrow pytest
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt   # fastapi/uvicorn/psycopg[binary]/pandas/lightgbm/pyarrow/pytest
 ```
+`requirements.txt` pins `psycopg[binary]` (libpq bundled — no system libpq). Full ops guide
+(launch / stop / reset / troubleshoot): [`../RUNBOOK.md`](../RUNBOOK.md).
 
 ## Run
 ```bash
@@ -73,5 +75,6 @@ attribution) · Ledger · Reports · System (run the pipeline, pick source) · M
 ../scripts/smoke.sh         # full chain on a throwaway db (leaves no artifacts)
 ```
 
-State (`monday.db*`, `data/`) is regenerated and gitignored. Heavy deps (pyarrow / future
-lightgbm) are lazily imported so the pure-logic suite runs on a bare interpreter.
+State lives in PostgreSQL (Docker volume `monday-pgdata`) + `data/` parquet — both disposable
+(`docker compose down -v` for a clean DB). Heavy deps (pyarrow / lightgbm / pandas) are lazily
+imported so the pure-logic suite runs on a bare interpreter.

@@ -2,14 +2,21 @@
 # portfolio / ledger / calibration / model registry / kv / pipeline lock). Production points
 # DATABASE_URL at a managed instance; this is the disposable dev DB matching the config default.
 #
-#   docker compose up -d
+#   docker compose up -d                            # start (data persists in the named volume)
+#   docker compose down                             # stop + remove container, KEEP data
+#   docker compose down -v                          # FULL reset — also drops the data volume
 #   createdb -h 127.0.0.1 -U monday monday_test     # one-off, for the test suite (MONDAY_TEST_DSN)
 #   DATABASE_URL=postgresql://monday:monday@127.0.0.1:5432/monday python -m monday
+#
+# GOTCHA: if host 127.0.0.1:5432 is unreachable after `up -d` even though the container is
+# "healthy" (a stale container can keep the port unpublished), recreate it:
+#   docker compose down && docker compose up -d
 
 services:
   postgres:
     image: postgres:16
     container_name: monday-postgres
+    restart: unless-stopped      # survive Docker Desktop restarts so host:5432 stays published
     environment:
       POSTGRES_USER: monday
       POSTGRES_PASSWORD: monday

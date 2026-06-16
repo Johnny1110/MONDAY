@@ -95,6 +95,7 @@ veto. Output is **paper-portfolio only — no real money, ever.**
 ```
 monday/
 ├── CLAUDE.md                 this file (loaded every session)
+├── RUNBOOK.md                ops guide: launch / stop / reset / re-test / troubleshoot (verified)
 ├── docs/whitepaper.md        authoritative spec (v0.1); docs/PRD/ docs/BUG/ hold tickets
 ├── evva-swarm.yml            swarm manifest (whitepaper appendix A draft)        ← to build
 ├── agents/                   evva agents                                          ← to build
@@ -127,6 +128,8 @@ monday/
 ## Tech stack
 
 - Engine: Python ≥ 3.11, FastAPI + uvicorn, **PostgreSQL** (psycopg 3 + psycopg_pool), **parquet** (pyarrow) for large tables.
+  Install via `engine/requirements.txt` (pins **`psycopg[binary]`** — libpq is bundled, so no system libpq;
+  plain `psycopg` boots with "no pq wrapper available"). `pyproject.toml` stays the packaging source of truth.
 - ML: LightGBM/XGBoost (GBDT is the workhorse: Ranker/Regressor/Classifier three heads), numpy/pandas, SHAP
   attribution; DL (LSTM/GRU/TFT) **must beat GBDT on walk-forward OOS IC before it joins the ensemble** —
   otherwise it does not ship (§5.2).
@@ -169,8 +172,10 @@ monday/
   sector) + TWSE fallback; **synthetic removed entirely** (tests/smoke run on a committed real-data fixture
   `tests/fixtures/tw_sample.json`). **Full 11-worker roster activated** (+a-tech / risk-monitor /
   quant-researcher / strategy-researcher); retrain → quant-researcher, pre-finalize risk gate → risk-monitor.
-  `universe_size=500` (widen to 800–1000). Launch: `FINMIND_TOKEN` in `engine/.env` → backfill → train GBDT →
-  `evva swarm .`.
+  `universe_size=500` (widen to 800–1000). **Launch / stop / reset / re-test / troubleshoot →
+  [RUNBOOK.md](RUNBOOK.md)** (verified ops guide). TL;DR: `pip install -r engine/requirements.txt` →
+  `docker compose up -d` (in `engine/`) → `FINMIND_TOKEN` in `engine/.env` → train GBDT →
+  `python -m monday` (:7790) → `evva service start` + `evva swarm run monday` (:8888).
 - ⬜ **§11 still open** (naming / cold-start history depth / long-only vs short / repo location / Telegram);
   universe scope + roster are now settled by the cutover.
 - ✅ **P0 platform foundation — COMPLETE.** `engine/monday/` runs the full chain (ingest → clean +
