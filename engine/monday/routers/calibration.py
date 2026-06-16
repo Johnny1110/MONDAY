@@ -11,7 +11,8 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from .. import calibration as calc
-from .. import pagination, store
+from .. import events, pagination, store, triggers
+from ..config import settings
 
 router = APIRouter(prefix="/api/calibration", tags=["calibration"])
 
@@ -64,15 +65,24 @@ def runs(page: int = 1, page_size: int = 50) -> dict:
 
 
 @router.post("/run")
-def save_run(window: str = "adhoc") -> dict:
-    """Snapshot the current scorecard into calibration_runs (the weekly review's input)."""
+def save_run(window: str = "adhoc", post: bool = True) -> dict:
+    """Snapshot the current scorecard into calibration_runs (the weekly review's input), then check the
+    run history for calibration drift / factor decay and (if ``post``) webhook quant-researcher — the §6
+    loop wakes on the data, not on a human reading the Friday scorecard."""
     sc = _scorecard()
     as_of = store.kv_get("last_as_of")
     run_id = f"calib-{as_of or 'na'}-{len(store.list_calibration_runs()) + 1}"
-    return store.add_calibration_run({
+    run = store.add_calibration_run({
         "run_id": run_id, "run_date": as_of, "window": window,
         "hit_rate": sc["hit_rate"], "tp_hit_rate": None,
         "avg_win": sc["avg_win"], "avg_loss": sc["avg_loss"], "ic": sc["ic"],
         "excess_vs_taiex": None, "attribution": sc["attribution_by_factor"],
         "adjustments": {"note": "P0 scorecard snapshot; ADR-linked adjustments land in P1 (§6.4)."},
     })
+    fired = triggers.evaluate_calibration(
+        store.list_calibration_runs(), ic_floor=settings.calibration_ic_floor,
+        drift_weeks=settings.calibration_drift_weeks, decay_periods=settings.factor_decay_periods)
+    if post:
+        for ev in fired:
+            events.post(settings.evva_webhook_url, ev)
+    return {**run, "triggers_fired": [e["data"]["event_type"] for e in fired]}

@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     holding_window_days: int = 20       # ≤1-month swing window
     candidate_pool: int = 50            # top-N the model hands to the LLM overlay
     drawdown_trigger_pct: float = 8.0   # portfolio_drawdown webhook threshold
+    calibration_ic_floor: float = 0.0   # §6.3: rank-IC below this for N runs → calibration_drift → quant-researcher
+    calibration_drift_weeks: int = 3    # consecutive sub-floor calibration runs before firing drift
+    factor_decay_periods: int = 3       # a factor's contribution <0 for N consecutive runs → factor_decay
     max_per_sector: int = 5             # risk gate: ≤N names per industry (§5.7)
     liquidity_adv_floor: float = 0.0    # risk gate: min 20d avg dollar volume (0 = off; universe gate already filters)
     universe_size: int = 500            # real sources: top-N listed names by liquidity (§4.1; launch 500, widen to 800-1000)

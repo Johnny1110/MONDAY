@@ -32,6 +32,20 @@ class TestSignals(unittest.TestCase):
         self.assertEqual(env["candidate_count"], 1)
         self.assertIsNone(env["candidates"][0]["factors"]["mom_60d"])
 
+    def test_envelope_surfaces_chip_and_technical_factors(self):
+        # the overlay reads these from the envelope instead of re-fetching per symbol (Opt #2 / B3b)
+        preds = [{"symbol": "2330", "name": "x", "rank": 1, "score": 0.5, "close": 100.0,
+                  "predicted_return": 0.05, "predicted_prob_tp": 0.6, "adv_20d": 1e6,
+                  "mom_20d": 0.1, "mom_60d": 0.08, "mom_120d": 0.02, "rsi_14": 60,
+                  "dist_high_60d": -0.02, "atr_14": 3.2, "vol_20d": 0.25,
+                  "foreign_streak": 4, "invtrust_streak": 2, "margin_chg_5d": -0.03,
+                  "short_chg_5d": 0.01}]
+        f = signals.build_envelope("2026-06-16", "baseline-0", "neutral", preds, 50)["candidates"][0]["factors"]
+        for k in ("foreign_streak", "invtrust_streak", "margin_chg_5d", "short_chg_5d", "atr_14", "vol_20d"):
+            self.assertIn(k, f)
+        self.assertEqual(f["foreign_streak"], 4)
+        self.assertEqual(f["atr_14"], 3.2)
+
     def test_build_envelope_defaults_backward_compatible(self):
         env = signals.build_envelope("2026-06-16", "baseline-0", "neutral", [], 50)
         self.assertIsNone(env["signals_version"])

@@ -1,9 +1,10 @@
 """Event-driven trigger detection (whitepaper §6.3 — webhook, not polling, invariant 7).
 
 Pure detection here; the actual fire-and-forget POST is done by the caller via ``events.post``
-(so this stays testable and the engine keeps serving even when the swarm is down). P0 wires the
-``portfolio_drawdown`` trigger end to end; ``calibration_drift`` / ``factor_decay`` builders
-exist in ``events`` and get their detectors in P1 once the ledger has multi-week history.
+(so this stays testable and the engine keeps serving even when the swarm is down). ``portfolio_drawdown``
+fires off the equity curve; ``calibration_drift`` / ``factor_decay`` fire off the calibration-run history
+(``evaluate_calibration``) so the §6 self-calibration loop wakes quant-researcher automatically instead of
+waiting for a human to read the Friday scorecard.
 """
 
 from __future__ import annotations
@@ -30,4 +31,59 @@ def evaluate(equity_curve: list[float], drawdown_threshold: float) -> list[dict]
         dd = max_drawdown(equity_curve)
         if dd > drawdown_threshold:
             out.append(events.portfolio_drawdown_event(dd, drawdown_threshold))
+    return out
+
+
+# --------------------------------------------------------------------------
+# Calibration detectors (§6.3) — read the calibration_runs history
+# --------------------------------------------------------------------------
+
+def calibration_series(runs: list[dict]) -> tuple[list[float | None], dict[str, list[float | None]]]:
+    """From calibration_runs (any order) → (ic_history oldest-first, {factor: contribution means
+    oldest-first}). Each run's ``attribution`` is {factor: {mean, n}} (the factor's mean realized return)
+    or absent → None for that run (a gap breaks a decay streak — conservative)."""
+    runs = sorted(runs, key=lambda r: (r.get("run_date") or "", str(r.get("run_id") or "")))
+    ic_history = [r.get("ic") for r in runs]
+    per_run, all_factors = [], set()
+    for r in runs:
+        attr = r.get("attribution") or {}
+        means = {f: v.get("mean") for f, v in attr.items() if isinstance(v, dict)}
+        per_run.append(means)
+        all_factors |= set(means)
+    factor_means = {f: [pr.get(f) for pr in per_run] for f in all_factors}
+    return ic_history, factor_means
+
+
+def detect_calibration_drift(ic_history: list[float | None], floor: float, weeks: int) -> dict | None:
+    """Fire when the last ``weeks`` rank-ICs are all present and < ``floor`` (predictions stopped tracking
+    realized ranking — force a retrain / data+regime check)."""
+    recent = ic_history[-weeks:]
+    if len(recent) < weeks or any(ic is None for ic in recent):
+        return None
+    return events.calibration_drift_event(round(recent[-1], 3), weeks) if all(ic < floor for ic in recent) else None
+
+
+def detect_factor_decay(factor_means: dict[str, list[float | None]], periods: int) -> list[dict]:
+    """Fire per factor whose mean contribution is present and < 0 for the last ``periods`` runs. (The
+    number carried is the factor's mean realized contribution — the available decay proxy; quant-researcher
+    does the rigorous per-factor IC on wake.)"""
+    out = []
+    for factor, series in sorted(factor_means.items()):
+        recent = series[-periods:]
+        if len(recent) < periods or any(m is None for m in recent):
+            continue
+        if all(m < 0 for m in recent):
+            out.append(events.factor_decay_event(factor, round(recent[-1], 3), periods))
+    return out
+
+
+def evaluate_calibration(runs: list[dict], *, ic_floor: float, drift_weeks: int,
+                         decay_periods: int) -> list[dict]:
+    """The calibration trigger payloads the run history warrants (built, not yet posted)."""
+    ic_history, factor_means = calibration_series(runs)
+    out: list[dict] = []
+    drift = detect_calibration_drift(ic_history, ic_floor, drift_weeks)
+    if drift:
+        out.append(drift)
+    out.extend(detect_factor_decay(factor_means, decay_periods))
     return out
