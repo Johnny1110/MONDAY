@@ -40,14 +40,17 @@ def _scorecard_rows() -> list[dict]:
 def _scorecard() -> dict:
     rows = [r for r in _scorecard_rows() if r["realized_return"] is not None]
     realized = [r["realized_return"] for r in rows]
+    probs, hits = [r["predicted_prob_tp"] for r in rows], [r["hit"] for r in rows]
     avg_win, avg_loss = calc.avg_win_loss(realized)
+    curve = calc.calibration_curve(probs, hits)
     return {
         "n": len(rows),
         "ic": calc.rank_ic([r["predicted_return"] for r in rows], realized),
         "hit_rate": calc.hit_rate(realized),
         "avg_win": avg_win, "avg_loss": avg_loss,
-        "calibration_curve": calc.calibration_curve(
-            [r["predicted_prob_tp"] for r in rows], [r["hit"] for r in rows]),
+        "calibration_curve": curve,
+        "brier": calc.brier(probs, hits),                    # single calibration KPI (lower = better)
+        "reliability_gap": calc.reliability_gap(curve),       # mean |observed − predicted| across bins
         "attribution_by_regime": calc.attribution(rows, "regime_label"),
         "attribution_by_factor": calc.attribution(rows, "contributing_factors"),
         "note": "P0: realized = settled outcome if present, else latest mark mtm (open ideas).",
@@ -77,7 +80,8 @@ def save_run(window: str = "adhoc", post: bool = True) -> dict:
         "hit_rate": sc["hit_rate"], "tp_hit_rate": None,
         "avg_win": sc["avg_win"], "avg_loss": sc["avg_loss"], "ic": sc["ic"],
         "excess_vs_taiex": None, "attribution": sc["attribution_by_factor"],
-        "adjustments": {"note": "P0 scorecard snapshot; ADR-linked adjustments land in P1 (§6.4)."},
+        "adjustments": {"note": "P0 scorecard snapshot; ADR-linked adjustments land in P1 (§6.4).",
+                        "brier": sc["brier"], "reliability_gap": sc["reliability_gap"]},
     })
     fired = triggers.evaluate_calibration(
         store.list_calibration_runs(), ic_floor=settings.calibration_ic_floor,

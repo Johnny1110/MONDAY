@@ -78,8 +78,10 @@ def finalize(payload: dict) -> dict:
         sectors = {}
     enriched = [{"symbol": p["symbol"], "sector": sectors.get(p["symbol"], "unknown"),
                  "adv_20d": p.get("adv_20d")} for p in chosen]
+    dd = portfolio.current_drawdown_pct(store.list_marks())   # graduated throttle (Imp #3)
     envelope["risk"] = risk.gate(enriched, max_names=settings.max_recommendations,
                                  max_per_sector=settings.max_per_sector,
-                                 adv_floor=settings.liquidity_adv_floor)
+                                 adv_floor=settings.liquidity_adv_floor,
+                                 drawdown_pct=dd, drawdown_soft_pct=settings.drawdown_soft_pct)
     envelope["signals_version"] = sig_version
     return envelope

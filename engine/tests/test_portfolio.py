@@ -26,6 +26,16 @@ class TestPortfolioMath(unittest.TestCase):
         self.assertAlmostEqual(oc["error"], 0.03)
         self.assertEqual(oc["exit_reason"], "tp")
 
+    def test_settle_nets_transaction_cost(self):
+        # +0.4% gross with a 0.6% round-trip cost → −0.2% net, and it's NOT a hit (honest, Imp)
+        oc = p.settle(100, 100.4, 0.05, "long", "timeout", cost=0.006)
+        self.assertAlmostEqual(oc["realized_return"], -0.002, places=4)
+        self.assertFalse(oc["hit"])
+        # error stays realized(net) − predicted
+        self.assertAlmostEqual(oc["error"], -0.002 - 0.05, places=4)
+        # cost=0 reproduces the old gross behaviour
+        self.assertAlmostEqual(p.settle(100, 108, 0.05, "long", "tp")["realized_return"], 0.08)
+
 
 class TestEquityCurve(unittest.TestCase):
     """The real equal-weight NAV curve (Imp #3) — pure, hand-worked scenarios."""

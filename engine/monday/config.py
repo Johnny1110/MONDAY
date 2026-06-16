@@ -43,8 +43,10 @@ class Settings(BaseSettings):
     # --- strategy knobs (calibratable; start values per whitepaper §5) -----------
     max_recommendations: int = 20       # ≤20 daily ideas
     holding_window_days: int = 20       # ≤1-month swing window
+    round_trip_cost_pct: float = 0.006  # honest fills (Imp): TW round-trip ≈ 0.1425%×2 broker + 0.3% tax + slippage
     candidate_pool: int = 50            # top-N the model hands to the LLM overlay
-    drawdown_trigger_pct: float = 8.0   # portfolio_drawdown webhook threshold
+    drawdown_trigger_pct: float = 8.0   # portfolio_drawdown webhook threshold (hard, after the fact)
+    drawdown_soft_pct: float = 4.0      # risk-gate graduated throttle: ease new exposure past this (Imp #3)
     calibration_min_samples: int = 30   # min settled outcomes before the conviction calibration map kicks in (else identity)
     calibration_ic_floor: float = 0.0   # §6.3: rank-IC below this for N runs → calibration_drift → quant-researcher
     calibration_drift_weeks: int = 3    # consecutive sub-floor calibration runs before firing drift

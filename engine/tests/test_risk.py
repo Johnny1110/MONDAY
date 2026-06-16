@@ -38,6 +38,17 @@ class TestRiskGate(unittest.TestCase):
         r = risk.gate(picks, max_names=20)
         self.assertTrue(any(v["type"] == "too_many_names" for v in r["violations"]))
 
+    def test_drawdown_throttle(self):
+        picks = [{"symbol": "2330", "sector": "半導體業"}]
+        past = risk.gate(picks, drawdown_pct=5.0, drawdown_soft_pct=4.0)
+        self.assertTrue(any(v["type"] == "drawdown_throttle" for v in past["violations"]))
+        self.assertFalse(past["passed"])                 # advisory only — never blocks, but flips passed
+        self.assertEqual(past["drawdown_pct"], 5.0)
+        below = risk.gate(picks, drawdown_pct=2.0, drawdown_soft_pct=4.0)
+        self.assertTrue(below["passed"])                 # under the soft line → quiet
+        off = risk.gate(picks, drawdown_pct=9.0, drawdown_soft_pct=0.0)   # disabled
+        self.assertTrue(off["passed"])
+
 
 class TestStockInfoParse(unittest.TestCase):
     def test_prefers_specific_sector(self):

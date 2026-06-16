@@ -288,10 +288,11 @@ def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
         syms = {p["symbol"] for p in store.list_positions()}
         return {s: bar_idx[(s, d)] for s in syms if (s, d) in bar_idx}
 
-    day0 = portfolio.mark_positions(as_of, lookup(as_of), settings.holding_window_days)
+    cost = settings.round_trip_cost_pct
+    day0 = portfolio.mark_positions(as_of, lookup(as_of), settings.holding_window_days, cost)
     fwd = {"marked": 0, "settled": 0}
     for d in forward_dates:
-        m = portfolio.mark_positions(d, lookup(d), settings.holding_window_days)
+        m = portfolio.mark_positions(d, lookup(d), settings.holding_window_days, cost)
         fwd["marked"] += m["marked"]
         fwd["settled"] += m["settled"]
     out["stages"]["mark_to_market"] = {"day0": day0, "forward": fwd,
@@ -333,7 +334,8 @@ def reconcile(as_of: str | None = None, source: str = "finmind", days: int = 30)
     bar_idx = {(b["symbol"], b["date"]): b for b in bars}
     mark_date = as_of or max(b["date"] for b in bars)
     lookup = {s: bar_idx[(s, mark_date)] for s in syms if (s, mark_date) in bar_idx}
-    res = portfolio.mark_positions(mark_date, lookup, settings.holding_window_days)
+    res = portfolio.mark_positions(mark_date, lookup, settings.holding_window_days,
+                                   settings.round_trip_cost_pct)
     store.kv_set("last_reconcile", mark_date)
     return {"mark_date": mark_date, **res, "portfolio": portfolio.summary()}
 

@@ -39,9 +39,11 @@ def hit_tp_sl(tp: float | None, sl: float | None, high: float | None, low: float
 
 
 def settle(entry: float, exit_price: float, predicted_return: float | None,
-           direction: str = "long", reason: str = "timeout") -> dict:
-    """Final settlement record for an exited idea (error = realized − predicted, §6.1)."""
-    realized = mtm_return(entry, exit_price, direction)
+           direction: str = "long", reason: str = "timeout", cost: float = 0.0) -> dict:
+    """Final settlement record for an exited idea (error = realized − predicted, §6.1). ``cost`` is the
+    round-trip transaction cost in return space (broker + tax + slippage) — ``realized`` is NET of it, and
+    ``hit`` means we actually profited after costs (honest paper P&L)."""
+    realized = mtm_return(entry, exit_price, direction) - cost
     return {
         "realized_return": round(realized, 4),
         "hit": realized > 0,
@@ -68,11 +70,12 @@ def open_from_recommendation(rec: dict) -> None:
 
 
 def mark_positions(mark_date: str, bar_lookup: dict[str, dict],
-                   window_days: int) -> dict:
+                   window_days: int, cost_pct: float = 0.0) -> dict:
     """Mark every OPEN position at ``mark_date`` and settle on TP/SL/timeout.
 
     ``bar_lookup`` maps symbol → {close, high, low}. SL takes precedence over TP when both are
-    touched the same day (conservative). Returns {marked, settled}.
+    touched the same day (conservative). ``cost_pct`` nets the round-trip transaction cost out of both the
+    daily mark and the settled return, so the ledger + equity curve are honest. Returns {marked, settled}.
     """
     marked = settled = 0
     for pos in store.list_positions(status="open"):
@@ -81,7 +84,7 @@ def mark_positions(mark_date: str, bar_lookup: dict[str, dict],
             continue
         rec = store.get_recommendation(pos["rec_id"]) or {}
         entry, direction = pos["entry_price"], pos["direction"]
-        r = mtm_return(entry, bar["close"], direction)
+        r = mtm_return(entry, bar["close"], direction) - cost_pct       # net of cost (honest)
         tp_hit, sl_hit = hit_tp_sl(rec.get("take_profit_price"), rec.get("stop_loss_price"),
                                    bar.get("high"), bar.get("low"), direction)
         days_held = _days_between(pos["entry_date"], mark_date)
@@ -105,7 +108,7 @@ def mark_positions(mark_date: str, bar_lookup: dict[str, dict],
             elif days_held >= window_days:
                 reason, exit_price = "timeout", bar["close"]
         if reason:
-            oc = settle(entry, exit_price, rec.get("predicted_return"), direction, reason)
+            oc = settle(entry, exit_price, rec.get("predicted_return"), direction, reason, cost=cost_pct)
             oc.update({"rec_id": pos["rec_id"], "exit_date": mark_date,
                        "exit_price": exit_price, "tp_hit": reason == "tp",
                        "sl_hit": reason == "sl"})
@@ -160,6 +163,13 @@ def equity_curve(marks: list[dict], base: float = 1.0) -> list[dict]:
         out.append({"date": d, "equity": round(nav, 4), "ret": round(r, 4),
                     "drawdown": round((nav - peak) / peak, 4) if peak else 0.0})
     return out
+
+
+def current_drawdown_pct(marks: list[dict]) -> float:
+    """The book's CURRENT peak-to-now drawdown as a positive percent (0 if flat/empty) — drives the risk
+    gate's graduated throttle (Imp #3)."""
+    curve = equity_curve(marks)
+    return round(abs(curve[-1]["drawdown"]) * 100, 2) if curve else 0.0
 
 
 def performance(curve: list[dict]) -> dict:

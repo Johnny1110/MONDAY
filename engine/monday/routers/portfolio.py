@@ -56,5 +56,7 @@ def risk_view() -> dict:
         sectors = {}
     picks = [{"symbol": p["symbol"], "sector": sectors.get(p["symbol"], "unknown"),
               "adv_20d": adv.get(p["symbol"])} for p in store.list_positions(status="open")]
+    dd = portfolio_mod.current_drawdown_pct(store.list_marks())   # graduated throttle (Imp #3)
     return risk.gate(picks, max_names=settings.max_recommendations,
-                     max_per_sector=settings.max_per_sector, adv_floor=settings.liquidity_adv_floor)
+                     max_per_sector=settings.max_per_sector, adv_floor=settings.liquidity_adv_floor,
+                     drawdown_pct=dd, drawdown_soft_pct=settings.drawdown_soft_pct)

@@ -35,6 +35,19 @@ class TestCalibration(unittest.TestCase):
         self.assertAlmostEqual(att["mom_20d"]["mean"], 0.0)
         self.assertAlmostEqual(att["mom_60d"]["mean"], 0.1)
 
+    def test_brier_perfect_vs_overconfident(self):
+        self.assertEqual(c.brier([1.0, 0.0, 1.0], [True, False, True]), 0.0)   # perfect
+        # over-confident 0.9 that only half hit → (0.9-1)²/2 + (0.9-0)²/2 = 0.005 + 0.405 = 0.41
+        self.assertAlmostEqual(c.brier([0.9, 0.9], [True, False]), 0.41, places=4)
+        self.assertIsNone(c.brier([], []))
+
+    def test_reliability_gap(self):
+        curve = [{"bin": 7, "mean_pred": 0.7, "observed": 0.5, "n": 10},   # 0.2 off
+                 {"bin": 2, "mean_pred": 0.2, "observed": 0.2, "n": 30}]   # spot on
+        # count-weighted: (0.2×10 + 0×30) / 40 = 0.05
+        self.assertAlmostEqual(c.reliability_gap(curve), 0.05, places=4)
+        self.assertIsNone(c.reliability_gap([]))
+
 
 if __name__ == "__main__":
     unittest.main()

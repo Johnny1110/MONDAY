@@ -84,6 +84,25 @@ def calibration_curve(probs: list[float], hits: list[bool], bins: int = 10) -> l
     return out
 
 
+def brier(probs: list[float], hits: list[bool]) -> float | None:
+    """Brier score = mean (p − hit)² over usable pairs — a single trackable calibration KPI (0 = perfect,
+    lower = better). None if there are no pairs."""
+    pairs = [(float(p), 1.0 if h else 0.0) for p, h in zip(probs, hits)
+             if p is not None and h is not None]
+    if not pairs:
+        return None
+    return round(sum((p - h) ** 2 for p, h in pairs) / len(pairs), 4)
+
+
+def reliability_gap(curve: list[dict]) -> float | None:
+    """Count-weighted mean |observed − mean_pred| across the calibration-curve bins (0 = perfectly
+    calibrated). ``curve`` is the output of ``calibration_curve``. None if empty."""
+    tot = sum(b["n"] for b in curve)
+    if not tot:
+        return None
+    return round(sum(abs(b["observed"] - b["mean_pred"]) * b["n"] for b in curve) / tot, 4)
+
+
 def attribution(rows: list[dict], key: str) -> dict:
     """Mean realized return grouped by ``key`` (a scalar like regime, or a list like factors/
     analysts). Tells the review SOP which factor/regime/analyst actually made money (§6.4)."""
