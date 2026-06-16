@@ -48,3 +48,18 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def reload() -> list[str]:
+    """Re-read ``.env`` into the module-global ``settings`` IN PLACE (B4). The engine can be started
+    before the deploy writes the FinMind token to ``.env``, and pydantic reads env only at construction;
+    this lets an operator refresh config without a restart so existing ``from .config import settings``
+    references see the new values. Returns the names of fields that changed — never their values
+    (secrets stay engine-side, invariant 2)."""
+    fresh = Settings()
+    changed = []
+    for name in Settings.model_fields:
+        if getattr(settings, name) != getattr(fresh, name):
+            changed.append(name)
+        setattr(settings, name, getattr(fresh, name))
+    return changed

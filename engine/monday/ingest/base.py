@@ -20,11 +20,47 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 
 log = logging.getLogger("monday.ingest")
 
 _last_call: dict[str, float] = {}   # rate_key → last wall-clock call time
 _rate_lock = threading.Lock()       # guards _last_call for concurrent fetches
+
+# Source usage counters (B3b) — per rate_key {calls, rate_limited, last_call_at, last_rate_limited_at}.
+# Counts only real network requests (cache hits return before the request loop), so it reflects FinMind
+# quota consumption. Drained by the pipeline at run-end into a per-day KV tally (GET /api/system/quota).
+_quota: dict[str, dict] = {}
+_quota_lock = threading.Lock()
+
+
+def _quota_bump(rate_key: str | None, *, rate_limited: bool = False) -> None:
+    if not rate_key:
+        return
+    iso = datetime.now(timezone.utc).isoformat()
+    with _quota_lock:
+        q = _quota.setdefault(rate_key, {"calls": 0, "rate_limited": 0,
+                                         "last_call_at": None, "last_rate_limited_at": None})
+        if rate_limited:
+            q["rate_limited"] += 1
+            q["last_rate_limited_at"] = iso
+        else:
+            q["calls"] += 1
+            q["last_call_at"] = iso
+
+
+def quota_snapshot() -> dict:
+    """A copy of the live per-source counters (does not reset)."""
+    with _quota_lock:
+        return {k: dict(v) for k, v in _quota.items()}
+
+
+def reset_quota_counters() -> dict:
+    """Return the current counters AND zero them — the pipeline drains these into the daily KV tally."""
+    with _quota_lock:
+        snap = {k: dict(v) for k, v in _quota.items()}
+        _quota.clear()
+        return snap
 
 
 class RateLimitError(RuntimeError):
@@ -84,6 +120,7 @@ def fetch_json(url: str, params: dict | None = None, *, cache_dir: str | None = 
     err = None
     for attempt in range(retries):
         _rate_limit(rate_key, min_interval)
+        _quota_bump(rate_key)                    # a real request is about to leave (cache hits never reach here)
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
@@ -92,6 +129,7 @@ def fetch_json(url: str, params: dict | None = None, *, cache_dir: str | None = 
             return data
         except urllib.error.HTTPError as e:
             if e.code in (402, 429):             # source quota / rate limit — in-run retry is futile
+                _quota_bump(rate_key, rate_limited=True)
                 raise RateLimitError(f"{url}: HTTP {e.code} (rate limit / quota)") from e
             err = e
             log.warning("ingest fetch %s failed (attempt %d/%d): %s", url, attempt + 1, retries, e)

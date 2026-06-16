@@ -19,28 +19,30 @@ from datetime import date
 from .symbols import DEFAULT_SYMBOLS
 
 
-def _real_universe(symbols, cache_dir):
+def _real_universe(symbols, cache_dir, universe_size=None):
     """Resolve the symbol list for a real source: caller-given, else the top-N listed board by
-    liquidity (§4.1), falling back to the curated set if TWSE is unreachable."""
+    liquidity (§4.1), falling back to the curated set if TWSE is unreachable. ``universe_size`` overrides
+    the configured default for this run (B5 — e.g. a fast 30-name preliminary run)."""
     if symbols is not None:
         return symbols
     from ..config import settings
     from .universe import build_universe
-    return build_universe(settings.universe_size, cache_dir=cache_dir) or DEFAULT_SYMBOLS
+    n = universe_size or settings.universe_size
+    return build_universe(n, cache_dir=cache_dir) or DEFAULT_SYMBOLS
 
 
-def _finmind_source(days, end_date=None, cache_dir=None, token="", symbols=None):
+def _finmind_source(days, end_date=None, cache_dir=None, token="", symbols=None, universe_size=None):
     from . import finmind
-    symbols = _real_universe(symbols, cache_dir)
+    symbols = _real_universe(symbols, cache_dir, universe_size)
     as_of = end_date or date.today()
     lookback = int(days * 1.7) + 20                       # calendar span → ~days trading rows
     # Concurrent, month-anchored, quota-graceful (replaces the serial loop that timed out).
     return finmind.fetch_universe_prices(symbols, as_of, lookback, token=token, cache_dir=cache_dir)
 
 
-def _twse_source(days, end_date=None, cache_dir=None, token="", symbols=None):
+def _twse_source(days, end_date=None, cache_dir=None, token="", symbols=None, universe_size=None):
     from . import twse
-    symbols = _real_universe(symbols, cache_dir)
+    symbols = _real_universe(symbols, cache_dir, universe_size)
     end = end_date or date.today()
     months = max(2, days // 18 + 2)
     bars: list[dict] = []

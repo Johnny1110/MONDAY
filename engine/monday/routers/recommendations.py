@@ -65,8 +65,11 @@ def finalize(payload: dict) -> dict:
     from .. import risk
     from ..ingest import finmind
     from ..pipeline import compose_recommendations    # lazy: keeps app import light
+    sig_version = env.get("signals_version")          # B9/B13 — tie the book to the exact snapshot
     _, envelope = compose_recommendations(chosen, env["as_of_date"], env["model_version"],
-                                          env.get("regime", "neutral"))
+                                          env.get("regime", "neutral"), signals_version=sig_version)
+    # mark the day finalized so a later/background prepare run won't clobber these signals (B13)
+    store.kv_set(f"finalized:{env['as_of_date']}", sig_version or env["as_of_date"])
     # §5.7 risk gate — advisory: attach violations for morgan/risk-monitor (never blocks)
     try:
         sectors = finmind.fetch_stock_info(settings.finmind_token,
@@ -78,4 +81,5 @@ def finalize(payload: dict) -> dict:
     envelope["risk"] = risk.gate(enriched, max_names=settings.max_recommendations,
                                  max_per_sector=settings.max_per_sector,
                                  adv_floor=settings.liquidity_adv_floor)
+    envelope["signals_version"] = sig_version
     return envelope

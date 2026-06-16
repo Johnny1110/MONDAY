@@ -13,11 +13,23 @@ Base URL: `http://127.0.0.1:7790`
 
 ## System
 - `GET /health` — liveness ping.
-- `GET /api/system/status` — versions, last pipeline day, counts.
-- `POST /api/system/run-pipeline?source=finmind&model=gbdt&finalize=true&days=180` — run the
-  chain (ingest → clean → PIT snapshot → features → model → signals [→ recommend → mark]). `source` ∈
-  {`finmind`,`twse`}; `model` ∈ {`baseline`,`gbdt`}; **`finalize=false` stops after signals**
-  (the swarm composes the book); `post`/`notify` fire swarm webhooks / Telegram.
+- `GET /api/system/status` — versions, last pipeline day, counts, `finmind_token_loaded` (is the
+  data-source key live this process), `universe_size`, and `pipeline` (the currently-running run, if any).
+- `POST /api/system/run-pipeline?source=finmind&model=gbdt&finalize=true&days=180` — trigger the
+  chain (ingest → clean → PIT snapshot → features → model → signals [→ recommend → mark]).
+  **ASYNC**: returns `{task_id, status:"running"}` (202) at once and runs in the background — **poll
+  `GET /api/system/tasks/{task_id}`** for stage/result; do not expect the result on this call.
+  **Single-flight**: a second trigger while one is running returns **409** (with the holder) — don't retry-spam.
+  Params: `source` ∈ {`finmind`,`twse`}; `model` ∈ {`baseline`,`gbdt`}; **`finalize=false` stops after
+  signals** (the swarm composes the book); `days` (history depth — use ≥120 or long-window momentum
+  factors go null and the ranking degrades, reported as `degraded_factors`); `universe_size` /
+  `symbols` (comma list e.g. `2330,2317`) scope the run; `as_of`; `force` (overwrite signals even if
+  the day is already finalized); `post`/`notify` fire swarm webhooks / Telegram.
+- `GET /api/system/tasks?limit=20` · `GET /api/system/tasks/{task_id}` — recent runs / one run's
+  status (`running|succeeded|failed`), current `stage`, and `result`/`error`.
+- `GET /api/system/quota` — FinMind usage (`today` per-day tally + `live` this process), with
+  `rate_limited_recently` — **when true the free tier is spent; stop hitting `/api/chips` and rely on
+  cache until reset** (chips returns 503 on quota).
 
 ## Data plane (read)
 - `GET /api/universe?as_of=` — analysable pool after the liquidity gate (§4.1).
@@ -30,8 +42,12 @@ Base URL: `http://127.0.0.1:7790`
 - `POST /api/models/train?source=finmind&days=400` — train + register a cold-start GBDT; reports OOS rank IC.
 
 ## Decision plane
-- `GET /api/signals/today` — the model's candidate ranking (you overlay/veto WITHIN this set;
-  never invent a name outside it — cardinal discipline 1, §5.6).
+- `GET /api/signals/today` — the model's LATEST candidate ranking (you overlay/veto WITHIN this set;
+  never invent a name outside it — cardinal discipline 1, §5.6). Carries `signals_version` +
+  `degraded_factors`.
+- `GET /api/signals/{date}` — the IMMUTABLE signals snapshot archived for that day — the exact set a
+  finalized book was built against, preserved even after later runs (decision traceability). Once a day
+  is finalized, a later prepare run won't overwrite `today` unless `force=true`.
 - `GET /api/recommendations/today` — the daily envelope (appendix C contract).
 - `GET /api/recommendations?as_of=` — persisted ideas (paginated).
 - `POST /api/recommendations` — commit one finalised idea `{rec_id, symbol, as_of_date, …}`;

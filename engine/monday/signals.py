@@ -10,14 +10,32 @@ from __future__ import annotations
 _FACTOR_KEYS = ["mom_20d", "mom_60d", "mom_120d", "rsi_14", "dist_high_60d"]
 
 
+def degraded_factors(feat_rows: list[dict], factor_keys: list[str] | None = None,
+                     threshold: float = 0.5) -> list[str]:
+    """Factors that are null across at least ``threshold`` of the universe — history is too thin to
+    compute them, so the ranking silently collapses onto the few that survive (B6: days<120 nulls
+    mom_60d/mom_120d/dist_high_60d). Pure + testable; surfaced in the envelope so the swarm sees the
+    degradation instead of trusting a single-factor rank."""
+    keys = factor_keys or _FACTOR_KEYS
+    n = len(feat_rows)
+    if not n:
+        return []
+    return [k for k in keys if sum(1 for r in feat_rows if r.get(k) is None) / n >= threshold]
+
+
 def build_envelope(as_of: str, model_version: str, regime: str,
-                   predictions: list[dict], pool: int) -> dict:
-    """The candidate envelope served at GET /api/signals/today."""
+                   predictions: list[dict], pool: int,
+                   signals_version: str | None = None, degraded: list[str] | None = None) -> dict:
+    """The candidate envelope served at GET /api/signals/today. ``signals_version`` stamps the immutable
+    snapshot this build is (B9/B13 — what morgan finalises against); ``degraded`` lists thin-history
+    factors (B6)."""
     cands = predictions[:pool]
     return {
         "as_of_date": as_of,
         "model_version": model_version,
+        "signals_version": signals_version,
         "regime": regime,
+        "degraded_factors": degraded or [],
         "candidate_count": len(cands),
         "candidates": [{
             "symbol": c["symbol"],

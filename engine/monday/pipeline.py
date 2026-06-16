@@ -14,11 +14,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import pathlib
+import time
 from collections import defaultdict
+from datetime import datetime, timezone
 
 from . import clean as clean_mod
-from . import events, portfolio, regime as regime_mod, signals, snapshot, store, telegram, triggers
+from . import events, portfolio, regime as regime_mod, signals, snapshot, store, tasks, telegram, triggers
 from .config import settings
 from .featurestore import build as fbuild
 from .ingest import get_source
@@ -27,9 +30,11 @@ from .models import baseline
 log = logging.getLogger("monday.pipeline")
 
 
-def _build_rec(c: dict, as_of: str, model_version: str, regime: str, window: int) -> dict:
+def _build_rec(c: dict, as_of: str, model_version: str, regime: str, window: int,
+               signals_version: str | None = None) -> dict:
     """A recommendation recorded AT BIRTH with every column calibration needs (§6.1). TP uses
-    max(model E[ret], 8%); SL fixed −8% — both multipliers are calibratable in P1 (§5.5)."""
+    max(model E[ret], 8%); SL fixed −8% — both multipliers are calibratable in P1 (§5.5).
+    ``signals_version`` ties the idea to the exact immutable signals snapshot it came from (B9/B13)."""
     entry = c["close"]
     tp_pct = max(c["predicted_return"], 0.08)
     return {
@@ -42,6 +47,7 @@ def _build_rec(c: dict, as_of: str, model_version: str, regime: str, window: int
         "conviction": c["predicted_prob_tp"],
         "model_version": model_version,
         "feature_snapshot_id": as_of,
+        "signals_version": signals_version,
         "regime_label": regime,
         "take_profit_price": round(entry * (1 + tp_pct), 2),
         "stop_loss_price": round(entry * (1 - 0.08), 2),
@@ -71,14 +77,16 @@ def _rec_envelope(recs: list[dict], as_of: str, model_version: str, regime: str)
 
 
 def compose_recommendations(preds: list[dict], as_of: str, model_version: str,
-                            regime: str) -> tuple[list[dict], dict]:
+                            regime: str, signals_version: str | None = None) -> tuple[list[dict], dict]:
     """Write recommendations (recorded at birth, §6.1) + open their paper positions, and persist
     the daily envelope. Used by the autonomous run AND by morgan's finalize endpoint (which passes
     the analyst-curated subset). ``preds`` rows carry flattened feature columns + close + the
-    predicted_* fields. Returns (recs, envelope)."""
+    predicted_* fields. ``signals_version`` is stamped onto each rec for traceability (B9/B13).
+    Returns (recs, envelope)."""
     recs = []
     for c in preds:
-        rec = _build_rec(c, as_of, model_version, regime, settings.holding_window_days)
+        rec = _build_rec(c, as_of, model_version, regime, settings.holding_window_days,
+                         signals_version=signals_version)
         store.add_recommendation(rec)
         portfolio.open_from_recommendation(rec)
         recs.append(rec)
@@ -127,18 +135,36 @@ def _infer(model: str, feat_rows: list[dict]) -> tuple[list[dict], str]:
 
 def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
         post: bool = False, notify: bool = False, source: str = "finmind",
-        model: str = "baseline", finalize: bool = True) -> dict:
+        model: str = "baseline", finalize: bool = True, universe_size: int | None = None,
+        symbols: str | None = None, force: bool = False, progress=None) -> dict:
     """Run the chain. ``source`` selects the ingest adapter ('finmind' | 'twse');
     ``model`` selects the predictor ('baseline' | 'gbdt'). ``finalize=True`` (autonomous) composes
     the full book + marks; ``finalize=False`` stops after signals so the swarm composes the book
-    via the analyst overlay (§5.6/§5.7). ``post`` fires swarm webhooks, ``notify`` pushes Telegram
-    (both no-op when unconfigured). Returns a stage-by-stage summary. Requires store.connect() first."""
+    via the analyst overlay (§5.6/§5.7). ``universe_size`` / ``symbols`` (comma list) override the
+    analysable pool for this run (B5). ``force`` overwrites signals even if the day is already
+    finalized (B9/B13 guard). ``post`` fires swarm webhooks, ``notify`` pushes Telegram (both no-op
+    when unconfigured). ``progress(stage, msg)`` reports per-stage progress (B8). Returns a
+    stage-by-stage summary. Requires store.connect() first."""
     out: dict = {"stages": {}}
+    _t0 = time.time()
+
+    def _emit(stage: str, msg: str = "") -> None:
+        if progress is not None:
+            progress(stage, msg)
+        log.info("pipeline[%6.1fs] %s %s", time.time() - _t0, stage, msg)
+
+    if days < 120:                               # B6: <120 trading days → mom_60d/mom_120d go null
+        log.warning("history depth days=%d < 120 — long-window momentum factors will be null "
+                    "(ranking degrades to short-window only)", days)
 
     # 1 — ingest (source-agnostic real free-core data: FinMind primary, TWSE fallback)
+    _emit("ingest", f"source={source} days={days} universe_size={universe_size or 'default'}")
     fetch = get_source(source)
     cache_dir = str(pathlib.Path(settings.data_dir) / "cache")
-    bars = fetch(days=days + mark_forward, cache_dir=cache_dir, token=settings.finmind_token)
+    parsed_symbols = ([(s.strip(), s.strip()) for s in symbols.split(",") if s.strip()]
+                      if symbols else None)      # B5: explicit symbol list, e.g. "2330,2317"
+    bars = fetch(days=days + mark_forward, cache_dir=cache_dir, token=settings.finmind_token,
+                 symbols=parsed_symbols, universe_size=universe_size)
     if not bars:
         raise RuntimeError(f"ingest source {source!r} returned no bars")
     dates = sorted({b["date"] for b in bars})
@@ -152,6 +178,7 @@ def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
     visible = [b for b in bars if b["date"] <= as_of]
 
     # 2 — clean + hard universe gate
+    _emit("clean", "quality gate + split-adjust + liquidity filter")
     cleaned, flagged = clean_mod.quality_gate(visible)
     cleaned = clean_mod.adjust_splits(cleaned)
     universe, dropped = clean_mod.liquidity_filter(cleaned)
@@ -163,25 +190,47 @@ def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
     out["stages"]["regime"] = regime
 
     # 3 — PIT snapshot (look-ahead cure, §4.2)
+    _emit("snapshot", "archive PIT prices")
     rows_on_disk = snapshot.write_snapshot(settings.data_dir, as_of, cleaned)
     out["stages"]["snapshot"] = {"as_of": as_of, "rows_on_disk": rows_on_disk}
 
     # 4 — feature store (+ chip factors when the source provides them, §5.6)
+    _emit("features", f"build features for {len(universe)} names")
     feat_rows = fbuild.build_features(cleaned, as_of, universe)
     if source == "finmind":
         _enrich_chips(feat_rows, as_of, cache_dir)
     fbuild.write_features(settings.data_dir, feat_rows)
-    out["stages"]["features"] = {"rows": len(feat_rows), "chips": source == "finmind"}
+    degraded = signals.degraded_factors(feat_rows)        # B6: factors null across most of the universe
+    if degraded:
+        log.warning("degraded factors (thin history, null across ≥50%% of universe): %s", degraded)
+    out["stages"]["features"] = {"rows": len(feat_rows), "chips": source == "finmind",
+                                 "degraded_factors": degraded}
 
     # 5 — inference (baseline momentum ranker, or a trained GBDT via --model gbdt)
+    _emit("inference", f"model={model}")
     preds, model_version = _infer(model, feat_rows)
     out["stages"]["inference"] = {"model": model_version, "ranked": len(preds)}
 
-    # 6 — candidate signals (served at /api/signals/today)
-    envelope = signals.build_envelope(as_of, model_version, regime,
-                                      preds, settings.candidate_pool)
-    store.kv_set("signals_today", json.dumps(envelope, ensure_ascii=False))
-    out["stages"]["signals"] = {"candidates": envelope["candidate_count"]}
+    # 6 — candidate signals (served at /api/signals/today + archived immutably at /api/signals/{date}).
+    # B9/B13: once a day is finalized, a later/background prepare run must NOT clobber the signals
+    # morgan composed against — preserve them unless force=True. The signals_version ties the book to
+    # the exact snapshot.
+    _emit("signals", "build candidate envelope")
+    signals_version = f"{as_of}#{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    already_final = store.kv_get(f"finalized:{as_of}")
+    preserve = bool(already_final) and not force
+    effective_version = already_final if preserve else signals_version
+    envelope = signals.build_envelope(as_of, model_version, regime, preds, settings.candidate_pool,
+                                      signals_version=effective_version, degraded=degraded)
+    if preserve:
+        log.warning("signals for %s already finalized (%s) — preserved; pass force=true to overwrite",
+                    as_of, already_final)
+    else:
+        store.kv_set("signals_today", json.dumps(envelope, ensure_ascii=False))     # latest
+        store.kv_set(f"signals:{as_of}", json.dumps(envelope, ensure_ascii=False))  # immutable per-date archive
+    out["stages"]["signals"] = {"candidates": envelope["candidate_count"],
+                                "signals_version": effective_version,
+                                "degraded_factors": degraded, "preserved": preserve}
 
     # 7 — finalize. Autonomous mode composes the full book; the swarm flow uses finalize=False
     # (data-engineer/quant prepare signals → analysts overlay → morgan composes via
@@ -190,13 +239,24 @@ def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
         out["stages"]["recommendations"] = {
             "written": 0,
             "note": "finalize=False — signals only; compose via POST /api/recommendations/finalize"}
+        _emit("done")
         return out
 
-    n = min(settings.max_recommendations, len(preds))
-    recs, rec_envelope = compose_recommendations(preds[:n], as_of, model_version, regime)
-    out["stages"]["recommendations"] = {"written": len(recs)}
+    if preserve:                                  # don't overwrite morgan's finalized book with the model top-N
+        out["stages"]["recommendations"] = {
+            "written": 0,
+            "note": f"{as_of} already finalized ({already_final}) — book preserved; force=true to recompose"}
+        recs, rec_envelope = [], None
+    else:
+        n = min(settings.max_recommendations, len(preds))
+        _emit("finalize", f"compose {n} ideas")
+        recs, rec_envelope = compose_recommendations(preds[:n], as_of, model_version, regime,
+                                                     signals_version=signals_version)
+        store.kv_set(f"finalized:{as_of}", signals_version)
+        out["stages"]["recommendations"] = {"written": len(recs)}
 
     # 8 — mark-to-market (open day + forward days): exercises the ledger
+    _emit("mark_to_market", "mark open positions")
     bar_idx = {(b["symbol"], b["date"]): b for b in bars}
 
     def lookup(d: str) -> dict:
@@ -224,9 +284,10 @@ def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
     store.add_report(f"pipeline run — {as_of}",
                      f"{len(recs)} ideas written; portfolio={psum}; "
                      f"triggers={out['triggers_fired']}", kind="recommendation")
-    if notify:
+    if notify and rec_envelope is not None:
         telegram.send(settings.telegram_bot_token, settings.telegram_chat_id,
                       telegram.format_recommendations(rec_envelope))
+    _emit("done")
     return out
 
 
@@ -265,20 +326,46 @@ def main(argv: list[str] | None = None) -> None:
                    help="stop after signals (don't auto-compose the book)")
     p.add_argument("--reconcile", action="store_true",
                    help="mark-to-market open positions instead of running the chain")
+    p.add_argument("--universe-size", type=int, default=None,
+                   help="override the analysable pool size for this run (B5)")
+    p.add_argument("--symbols", default=None,
+                   help="explicit comma list e.g. 2330,2317 (default: the full universe)")
+    p.add_argument("--force", action="store_true",
+                   help="overwrite signals even if the day is already finalized")
+    p.add_argument("--verbose", action="store_true", help="print per-stage progress + timing")
     p.add_argument("--post", action="store_true", help="fire swarm webhooks")
     p.add_argument("--notify", action="store_true", help="push Telegram")
     a = p.parse_args(argv)
 
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
+    logging.basicConfig(level=logging.INFO if a.verbose else logging.WARNING,
+                        format="%(levelname)s %(name)s %(message)s")
     store.connect(settings.sqlite_path)
     try:
+        kind = "reconcile-cli" if a.reconcile else "pipeline-cli"
+        task = tasks.new_task(kind, dict(vars(a)))
+        # single-flight across processes (B11): refuse if an HTTP or CLI run already holds the lock
+        if not store.acquire_pipeline_lock(task["task_id"], holder=f"cli:{os.getpid()}"):
+            tasks.update(task["task_id"], status="failed", message="another pipeline is running")
+            print(json.dumps({"error": "pipeline already running",
+                              "holder": store.pipeline_lock_holder()}, ensure_ascii=False, indent=2))
+            raise SystemExit(2)
         if a.reconcile:
-            summary = reconcile(as_of=a.as_of, source=a.source)
+            def target(progress):                                  # reconcile ignores progress
+                return reconcile(as_of=a.as_of, source=a.source)
         else:
-            summary = run(as_of=a.as_of, days=a.days, mark_forward=a.mark_forward,
-                          post=a.post, notify=a.notify, source=a.source, model=a.model,
-                          finalize=a.finalize)
-        print(json.dumps(summary, ensure_ascii=False, indent=2))
+            def target(progress):
+                return run(as_of=a.as_of, days=a.days, mark_forward=a.mark_forward, post=a.post,
+                           notify=a.notify, source=a.source, model=a.model, finalize=a.finalize,
+                           universe_size=a.universe_size, symbols=a.symbols, force=a.force,
+                           progress=progress)
+        # runner records the task, heartbeats + releases the lock, flushes the quota tally, fires events
+        rec = tasks.runner(task["task_id"], target, post=a.post, webhook_url=settings.evva_webhook_url)
+        if rec.get("status") == "succeeded":
+            print(json.dumps(rec.get("result"), ensure_ascii=False, indent=2))
+        else:
+            print(json.dumps({"status": rec.get("status"), "error": rec.get("error")},
+                             ensure_ascii=False, indent=2))
+            raise SystemExit(1)
     finally:
         store.close()
 

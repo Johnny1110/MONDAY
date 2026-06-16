@@ -67,6 +67,25 @@ def pipeline_failed_event(stage: str, detail: str, to: str = "leader") -> dict:
         to=to)
 
 
+def pipeline_complete_event(as_of: str, candidate_count: int, signals_version: str | None = None,
+                            regime: str | None = None, degraded_factors: list | None = None,
+                            to: str = "leader") -> dict:
+    """`pipeline_complete`: the daily chain finished and signals are refreshed — wake downstream agents
+    event-driven instead of on a fixed cron (B12). Carries the signals_version so a woken agent acts on
+    exactly the snapshot just produced (no race with a later run)."""
+    degraded = degraded_factors or []
+    warn = f"；退化因子 {degraded}（歷史深度不足）" if degraded else ""
+    return build_event(
+        f"pipeline complete: {as_of} ({candidate_count} candidates)",
+        f"當日 pipeline 完成，{as_of} 訊號已更新（{candidate_count} 檔候選，regime={regime}）{warn}。",
+        data={"event_type": "pipeline_complete", "as_of": as_of,
+              "candidate_count": candidate_count, "signals_version": signals_version,
+              "regime": regime, "degraded_factors": degraded,
+              "suggested_action": "對候選集做分析師 overlay／風險閘（GET /api/signals/today, /api/portfolio/risk），"
+                                  "再 POST /api/recommendations/finalize 定案。"},
+        to=to)
+
+
 def _build_request(url: str, payload: dict) -> urllib.request.Request:
     req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), method="POST")
     req.add_header("Content-Type", "application/json")

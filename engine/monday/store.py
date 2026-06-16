@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 _conn: sqlite3.Connection | None = None
 _LOCK = threading.RLock()  # reentrant write mutex — serializes ALL connection access
@@ -151,6 +151,19 @@ CREATE TABLE IF NOT EXISTS kv (
     k TEXT PRIMARY KEY,
     v TEXT
 );
+
+-- Single-flight pipeline mutex (B11): one row, taken via an atomic conditional UPDATE so the lock
+-- holds ACROSS processes (the HTTP server and a CLI run are separate OS processes sharing this file;
+-- the in-process RLock does not span them). A stale heartbeat reclaims a crashed run. NOT in _TABLES
+-- so reset() never wipes the seed row.
+CREATE TABLE IF NOT EXISTS pipeline_lock (
+    id           INTEGER PRIMARY KEY CHECK (id = 1),
+    task_id      TEXT,
+    holder       TEXT,
+    started_at   TEXT,
+    heartbeat_at TEXT
+);
+INSERT OR IGNORE INTO pipeline_lock (id, task_id) VALUES (1, NULL);
 """
 
 _TABLES = ("recommendations", "paper_positions", "ledger_marks", "outcomes",
@@ -190,7 +203,16 @@ def connect(path: str) -> None:
         _conn.execute("PRAGMA journal_mode=WAL")
         _conn.execute("PRAGMA busy_timeout=5000")
         _conn.executescript(_SCHEMA)
+        _migrate()
         _conn.commit()
+
+
+def _migrate() -> None:
+    """Idempotent, additive-only migrations on an existing DB (CREATE TABLE IF NOT EXISTS can't add a
+    column to a pre-existing table). Safe to run on every connect, on fresh and live ``monday.db``."""
+    cols = {r["name"] for r in _db().execute("PRAGMA table_info(recommendations)")}
+    if "signals_version" not in cols:        # B9/B13 — which immutable signals snapshot a rec was built from
+        _db().execute("ALTER TABLE recommendations ADD COLUMN signals_version TEXT")
 
 
 def close() -> None:
@@ -234,6 +256,50 @@ def kv_set(k: str, v: str) -> None:
 
 
 # --------------------------------------------------------------------------
+# Single-flight pipeline lock (B11) — cross-process via one atomic UPDATE
+# --------------------------------------------------------------------------
+
+def acquire_pipeline_lock(task_id: str, holder: str = "", stale_seconds: int = 1800) -> bool:
+    """Take the single pipeline slot. Succeeds only if it's free OR the current holder's heartbeat is
+    older than ``stale_seconds`` (a crashed run is reclaimed). One conditional UPDATE → atomic across
+    processes (sqlite serializes writers under WAL). Returns True iff acquired."""
+    now = _now()
+    stale_before = (datetime.now(timezone.utc) - timedelta(seconds=stale_seconds)).isoformat()
+    with _LOCK:
+        cur = _db().execute(
+            "UPDATE pipeline_lock SET task_id=?, holder=?, started_at=?, heartbeat_at=? "
+            "WHERE id=1 AND (task_id IS NULL OR heartbeat_at < ?)",
+            (task_id, holder, now, now, stale_before))
+        _db().commit()
+        return cur.rowcount == 1
+
+
+def heartbeat_pipeline_lock(task_id: str) -> None:
+    """Refresh the holder's heartbeat so a long (legitimate) run isn't reclaimed as stale."""
+    with _LOCK:
+        _db().execute("UPDATE pipeline_lock SET heartbeat_at=? WHERE task_id=?", (_now(), task_id))
+        _db().commit()
+
+
+def release_pipeline_lock(task_id: str) -> None:
+    """Free the slot — only if ``task_id`` still owns it (never steals another run's lock)."""
+    with _LOCK:
+        _db().execute(
+            "UPDATE pipeline_lock SET task_id=NULL, holder=NULL, started_at=NULL, heartbeat_at=NULL "
+            "WHERE task_id=?", (task_id,))
+        _db().commit()
+
+
+def pipeline_lock_holder() -> dict | None:
+    """The current holder row ({task_id, holder, started_at, heartbeat_at}), or None if free."""
+    with _LOCK:
+        row = _db().execute(
+            "SELECT task_id, holder, started_at, heartbeat_at FROM pipeline_lock "
+            "WHERE id=1 AND task_id IS NOT NULL").fetchone()
+        return dict(row) if row else None
+
+
+# --------------------------------------------------------------------------
 # Recommendations (whitepaper §6.1 — recorded at birth)
 # --------------------------------------------------------------------------
 
@@ -241,7 +307,7 @@ _REC_FIELDS = ("rec_id", "as_of_date", "symbol", "name", "direction", "entry_ref
                "predicted_return", "predicted_prob_tp", "conviction", "model_version",
                "feature_snapshot_id", "regime_label", "take_profit_price", "stop_loss_price",
                "holding_window_days", "contributing_factors", "contributing_analysts",
-               "rationale", "risk_notes")
+               "rationale", "risk_notes", "signals_version")
 
 
 def add_recommendation(rec: dict) -> dict:
