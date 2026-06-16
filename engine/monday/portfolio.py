@@ -3,7 +3,7 @@
 Two layers, kept separate so the math is unit-testable without a database:
   * **pure functions** (``mtm_return`` / ``hit_tp_sl`` / ``settle``) — same input → same output;
   * **store-integrating ops** (``open_from_recommendation`` / ``mark_positions`` / ``summary``)
-    that drive the sqlite ledger.
+    that drive the ledger (PostgreSQL via ``store``).
 No real money ever (cardinal discipline 2 / whitepaper §9): a "position" is a bookkeeping row.
 """
 

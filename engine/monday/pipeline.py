@@ -339,7 +339,7 @@ def main(argv: list[str] | None = None) -> None:
 
     logging.basicConfig(level=logging.INFO if a.verbose else logging.WARNING,
                         format="%(levelname)s %(name)s %(message)s")
-    store.connect(settings.sqlite_path)
+    store.connect(settings.database_url, settings.db_pool_min, settings.db_pool_max)
     try:
         kind = "reconcile-cli" if a.reconcile else "pipeline-cli"
         task = tasks.new_task(kind, dict(vars(a)))

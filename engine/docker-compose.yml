@@ -1,0 +1,30 @@
+# Local/dev PostgreSQL for the Monday engine's transactional store (engine-internal — recs / paper
+# portfolio / ledger / calibration / model registry / kv / pipeline lock). Production points
+# DATABASE_URL at a managed instance; this is the disposable dev DB matching the config default.
+#
+#   docker compose up -d
+#   createdb -h 127.0.0.1 -U monday monday_test     # one-off, for the test suite (MONDAY_TEST_DSN)
+#   DATABASE_URL=postgresql://monday:monday@127.0.0.1:5432/monday python -m monday
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: monday-postgres
+    environment:
+      POSTGRES_USER: monday
+      POSTGRES_PASSWORD: monday
+      POSTGRES_DB: monday
+    ports:
+      - "5432:5432"
+    volumes:
+      - monday-pgdata:/var/lib/postgresql/data
+      # auto-create the throwaway test database on first boot (used by MONDAY_TEST_DSN)
+      - ./scripts/initdb-test.sql:/docker-entrypoint-initdb.d/10-monday-test.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U monday -d monday"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  monday-pgdata:

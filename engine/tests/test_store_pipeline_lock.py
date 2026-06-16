@@ -1,13 +1,15 @@
-"""Cross-process pipeline single-flight lock (B11) + the signals_version migration — :memory:, no deps."""
+"""Cross-process pipeline single-flight lock (B11) + the signals_version migration (PostgreSQL)."""
 
 import unittest
 
 from monday import store
+from tests.pgtest import fresh_store, requires_pg
 
 
+@requires_pg
 class TestPipelineLock(unittest.TestCase):
     def setUp(self):
-        store.connect(":memory:")
+        fresh_store()
 
     def tearDown(self):
         store.close()

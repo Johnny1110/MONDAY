@@ -1,7 +1,7 @@
 """Parquet I/O for the large, read-only analysis tables (invariant 5).
 
 PIT snapshots, price history and the feature store live in parquet (columnar, analysis-
-friendly), NOT sqlite — sqlite is reserved for transactional state (recs/ledger/…). pyarrow
+friendly), NOT the database — PostgreSQL is reserved for transactional state (recs/ledger/…). pyarrow
 is a heavy dep, so it is **lazily imported** here (invariant 6); nothing at module top level
 pulls it in, keeping the pure-logic layers importable in any environment.
 

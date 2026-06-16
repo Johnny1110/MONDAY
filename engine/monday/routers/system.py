@@ -2,7 +2,7 @@
 
 The chain is long (5–300 s), so POST /run-pipeline is ASYNC (B10): it returns a ``task_id`` and runs
 in a background thread; poll GET /tasks/{id}. It is single-flight (B11) — a second trigger gets 409 —
-and the same lock spans CLI runs (separate process, shared sqlite). GET /quota surfaces FinMind usage
+and the same lock spans CLI runs (separate process, shared Postgres). GET /quota surfaces FinMind usage
 so agents back off when the free tier is spent (B3b); /status reports token readiness (B4).
 """
 
@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
 from .. import __version__, store, tasks
-from ..config import settings
+from ..config import redacted_database_url, settings
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
@@ -36,7 +36,7 @@ def status() -> dict:
         "universe_size": settings.universe_size,
         "pipeline": store.pipeline_lock_holder(),               # the currently-running pipeline, if any
         "data_dir": settings.data_dir,
-        "sqlite_path": settings.sqlite_path,
+        "database": redacted_database_url(),                     # host:port/db — creds redacted (token-free)
     }
 
 

@@ -8,7 +8,9 @@ dependencies = [
     "uvicorn",
     "pydantic-settings",
     "numpy",
-    "pyarrow",        # parquet for large feature/price tables (invariant 5)
+    "pyarrow",                 # parquet for large feature/price tables (invariant 5)
+    "psycopg[binary]>=3.1",    # transactional store — PostgreSQL ([binary] bundles libpq)
+    "psycopg-pool",            # connection pool (replaces the sqlite single-conn + RLock)
 ]
 
 [project.optional-dependencies]

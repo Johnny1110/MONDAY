@@ -6,11 +6,13 @@ import unittest
 from datetime import datetime, timezone
 
 from monday import store, tasks
+from tests.pgtest import fresh_store, requires_pg
 
 
+@requires_pg
 class TestTasks(unittest.TestCase):
     def setUp(self):
-        store.connect(":memory:")
+        fresh_store()
 
     def tearDown(self):
         store.close()

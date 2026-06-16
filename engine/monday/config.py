@@ -2,8 +2,8 @@
 
 The platform holds every data-source credential (TWSE/FinMind/CMoney/…) and the agents
 hold only HTTP (invariants 1 & 2) — so this is where keys live, never in an agent prompt.
-Everything else is small operational knobs (sqlite path, parquet data dir, webhook URL,
-Telegram). No Postgres/Redis: durable state is one sqlite file + parquet tables (invariant 5).
+Everything else is small operational knobs (the PostgreSQL DSN, parquet data dir, webhook URL,
+Telegram). Durable state = PostgreSQL (transactional) + parquet (large analysis tables), invariant 5.
 """
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -33,7 +33,11 @@ class Settings(BaseSettings):
     monday_port: int = 7790
 
     # --- local state -------------------------------------------------------------
-    sqlite_path: str = "monday.db"      # transactional state (recs/ledger/calibration/…)
+    # Transactional state — PostgreSQL (engine-internal; the DSN holds creds and lives here only,
+    # never exposed to agents, invariant 2). Override via DATABASE_URL in .env.
+    database_url: str = "postgresql://monday:monday@127.0.0.1:5432/monday"
+    db_pool_min: int = 1                # psycopg connection-pool sizing
+    db_pool_max: int = 10
     data_dir: str = "data"              # parquet root (PIT snapshots / prices / features)
 
     # --- strategy knobs (calibratable; start values per whitepaper §5) -----------
@@ -63,3 +67,13 @@ def reload() -> list[str]:
             changed.append(name)
         setattr(settings, name, getattr(fresh, name))
     return changed
+
+
+def redacted_database_url() -> str:
+    """``host:port/dbname`` of the transactional DB — for /status and logs WITHOUT the user:password
+    (the DSN is engine-side; never leak creds to agents, invariant 2)."""
+    from urllib.parse import urlsplit
+    u = urlsplit(settings.database_url)
+    port = f":{u.port}" if u.port else ""
+    db = (u.path or "/").lstrip("/") or "?"
+    return f"{u.hostname or '?'}{port}/{db}"

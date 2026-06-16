@@ -1,33 +1,34 @@
-"""Transactional durable state — a single SQLite file (invariant 5).
+"""Transactional durable state — PostgreSQL (engine-internal, creds engine-side).
 
 The platform keeps its *transactional* state here: recommendations, the paper portfolio,
 the calibration ledger (marks + outcomes), the model registry, calibration-run scorecards,
-agent memory, the work journal, User reports, and a small kv. Large analysis tables (PIT
-snapshots / prices / features) live in parquet (``parquetio``), not here.
+agent memory, the work journal, User reports, a small kv, and the single-flight pipeline lock.
+Large analysis tables (PIT snapshots / prices / features) live in parquet (``parquetio``), not here.
 
-Concurrency (load-bearing, copied from Sunday's proven pattern): FastAPI serves sync
-endpoints from a threadpool, so the one connection is shared across threads
-(``check_same_thread=False``). A single SQLite connection is NOT safe for concurrent use and
-concurrent writers deadlock, so **every** access — reads included — is serialized through one
-**reentrant** write mutex ``_LOCK`` (a write helper re-reads via a getter while still holding
-the lock; a plain Lock would self-deadlock). WAL + ``busy_timeout`` are the second line of
-defence. ``connect(path)`` takes the path explicitly so the logic stays unit-testable against
-``:memory:`` (no config import).
+Concurrency: a **psycopg connection pool** + PostgreSQL MVCC — each request/thread borrows its own
+connection, and PG serializes writers at the row level. (This replaced a single shared sqlite
+connection guarded by a global RLock + WAL/busy_timeout: the workaround that the 2026-06-15 run hit as
+SQLITE_BUSY, B11.) ``connect(dsn)`` takes the DSN explicitly so the logic stays config-free and
+unit-testable against a throwaway database. Every op runs inside one ``_cur()`` block = one transaction
+(psycopg commits on clean exit, rolls back on exception); the one multi-statement atomic op
+(``open_position``) keeps both statements in a single block.
 
 The schema mirrors whitepaper appendix B (recommendations / ledger_marks / outcomes /
-model_registry / calibration_runs) plus the paper-portfolio position table and the generic
-memory/journal/report/kv tables carried over from Sunday.
+model_registry / calibration_runs) plus the paper-portfolio position table, the generic
+memory/journal/report/kv tables, and the pipeline_lock lease.
 """
 
 from __future__ import annotations
 
 import json
-import sqlite3
-import threading
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
-_conn: sqlite3.Connection | None = None
-_LOCK = threading.RLock()  # reentrant write mutex — serializes ALL connection access
+import psycopg
+from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
+
+_pool: ConnectionPool | None = None
 
 _SCHEMA = """
 -- Every idea, fully recorded AT BIRTH — without these columns it cannot be regressed
@@ -38,15 +39,15 @@ CREATE TABLE IF NOT EXISTS recommendations (
     symbol              TEXT NOT NULL,
     name                TEXT,
     direction           TEXT NOT NULL DEFAULT 'long',
-    entry_ref_price     REAL,
-    predicted_return    REAL,
-    predicted_prob_tp   REAL,
-    conviction          REAL,
+    entry_ref_price     DOUBLE PRECISION,
+    predicted_return    DOUBLE PRECISION,
+    predicted_prob_tp   DOUBLE PRECISION,
+    conviction          DOUBLE PRECISION,
     model_version       TEXT,
     feature_snapshot_id TEXT,
     regime_label        TEXT,
-    take_profit_price   REAL,
-    stop_loss_price     REAL,
+    take_profit_price   DOUBLE PRECISION,
+    stop_loss_price     DOUBLE PRECISION,
     holding_window_days INTEGER,
     contributing_factors  TEXT,   -- JSON list
     contributing_analysts TEXT,   -- JSON list
@@ -62,9 +63,9 @@ CREATE TABLE IF NOT EXISTS paper_positions (
     rec_id      TEXT PRIMARY KEY,
     symbol      TEXT NOT NULL,
     direction   TEXT NOT NULL DEFAULT 'long',
-    entry_price REAL NOT NULL,
+    entry_price DOUBLE PRECISION NOT NULL,
     entry_date  TEXT NOT NULL,
-    qty         REAL NOT NULL DEFAULT 1,
+    qty         DOUBLE PRECISION NOT NULL DEFAULT 1,
     status      TEXT NOT NULL DEFAULT 'open'   -- open | closed
 );
 CREATE INDEX IF NOT EXISTS idx_pos_open ON paper_positions (status, symbol);
@@ -73,10 +74,10 @@ CREATE INDEX IF NOT EXISTS idx_pos_open ON paper_positions (status, symbol);
 CREATE TABLE IF NOT EXISTS ledger_marks (
     rec_id        TEXT NOT NULL,
     mark_date     TEXT NOT NULL,
-    close_price   REAL,
-    mtm_return    REAL,
-    max_favorable REAL,
-    max_adverse   REAL,
+    close_price   DOUBLE PRECISION,
+    mtm_return    DOUBLE PRECISION,
+    max_favorable DOUBLE PRECISION,
+    max_adverse   DOUBLE PRECISION,
     tp_hit        INTEGER DEFAULT 0,
     sl_hit        INTEGER DEFAULT 0,
     days_held     INTEGER,
@@ -87,20 +88,20 @@ CREATE TABLE IF NOT EXISTS ledger_marks (
 CREATE TABLE IF NOT EXISTS outcomes (
     rec_id          TEXT PRIMARY KEY,
     exit_date       TEXT,
-    exit_price      REAL,
-    realized_return REAL,
+    exit_price      DOUBLE PRECISION,
+    realized_return DOUBLE PRECISION,
     hit             INTEGER,   -- realized_return > 0
     tp_hit          INTEGER,
     sl_hit          INTEGER,
     exit_reason     TEXT,      -- tp | sl | timeout
-    error           REAL       -- realized_return - predicted_return
+    error           DOUBLE PRECISION  -- realized_return - predicted_return
 );
 
 CREATE TABLE IF NOT EXISTS model_registry (
     model_version TEXT PRIMARY KEY,
     trained_at    TEXT,
     train_window  TEXT,
-    cv_ic         REAL,
+    cv_ic         DOUBLE PRECISION,
     factor_set    TEXT,        -- JSON list
     regime_weights TEXT,       -- JSON object
     notes         TEXT
@@ -110,13 +111,13 @@ CREATE TABLE IF NOT EXISTS model_registry (
 CREATE TABLE IF NOT EXISTS calibration_runs (
     run_id         TEXT PRIMARY KEY,
     run_date       TEXT,
-    window         TEXT,
-    hit_rate       REAL,
-    tp_hit_rate    REAL,
-    avg_win        REAL,
-    avg_loss       REAL,
-    ic             REAL,
-    excess_vs_taiex REAL,
+    "window"       TEXT,             -- quoted: `window` is a reserved keyword in PostgreSQL
+    hit_rate       DOUBLE PRECISION,
+    tp_hit_rate    DOUBLE PRECISION,
+    avg_win        DOUBLE PRECISION,
+    avg_loss       DOUBLE PRECISION,
+    ic             DOUBLE PRECISION,
+    excess_vs_taiex DOUBLE PRECISION,
     attribution    TEXT,       -- JSON
     adjustments    TEXT        -- JSON (ADR-linked)
 );
@@ -129,7 +130,7 @@ CREATE TABLE IF NOT EXISTS memory (
 );
 
 CREATE TABLE IF NOT EXISTS journal (
-    id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    id     BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     ts     TEXT NOT NULL,
     date   TEXT,
     author TEXT NOT NULL DEFAULT 'reviewer-calibrator',
@@ -139,7 +140,7 @@ CREATE TABLE IF NOT EXISTS journal (
 CREATE INDEX IF NOT EXISTS idx_journal_recent ON journal (id DESC);
 
 CREATE TABLE IF NOT EXISTS report (
-    id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    id    BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     ts    TEXT NOT NULL,
     kind  TEXT NOT NULL DEFAULT 'info',   -- info | recommendation | review | alert
     title TEXT,
@@ -153,9 +154,8 @@ CREATE TABLE IF NOT EXISTS kv (
 );
 
 -- Single-flight pipeline mutex (B11): one row, taken via an atomic conditional UPDATE so the lock
--- holds ACROSS processes (the HTTP server and a CLI run are separate OS processes sharing this file;
--- the in-process RLock does not span them). A stale heartbeat reclaims a crashed run. NOT in _TABLES
--- so reset() never wipes the seed row.
+-- holds ACROSS processes (the HTTP server and a CLI run are separate OS processes). A stale heartbeat
+-- reclaims a crashed run. NOT in _TABLES so reset() never wipes the seed row.
 CREATE TABLE IF NOT EXISTS pipeline_lock (
     id           INTEGER PRIMARY KEY CHECK (id = 1),
     task_id      TEXT,
@@ -163,7 +163,7 @@ CREATE TABLE IF NOT EXISTS pipeline_lock (
     started_at   TEXT,
     heartbeat_at TEXT
 );
-INSERT OR IGNORE INTO pipeline_lock (id, task_id) VALUES (1, NULL);
+INSERT INTO pipeline_lock (id, task_id) VALUES (1, NULL) ON CONFLICT (id) DO NOTHING;
 """
 
 _TABLES = ("recommendations", "paper_positions", "ledger_marks", "outcomes",
@@ -182,7 +182,7 @@ def _enc(v) -> str | None:
     return None if v is None else json.dumps(v, ensure_ascii=False)
 
 
-def _row(row: sqlite3.Row | None) -> dict | None:
+def _row(row: dict | None) -> dict | None:
     if row is None:
         return None
     d = dict(row)
@@ -195,47 +195,61 @@ def _row(row: sqlite3.Row | None) -> dict | None:
     return d
 
 
-def connect(path: str) -> None:
-    global _conn
-    with _LOCK:
-        _conn = sqlite3.connect(path, check_same_thread=False)
-        _conn.row_factory = sqlite3.Row
-        _conn.execute("PRAGMA journal_mode=WAL")
-        _conn.execute("PRAGMA busy_timeout=5000")
-        _conn.executescript(_SCHEMA)
-        _migrate()
-        _conn.commit()
+def connect(dsn: str, min_size: int = 1, max_size: int = 10) -> None:
+    """Open the connection pool to ``dsn`` and create the schema (idempotent). ``dsn`` is a libpq URI
+    (postgresql://user:pw@host:port/db) — engine-side only, never exposed to agents."""
+    global _pool
+    if _pool is not None:                  # idempotent: close a prior pool before replacing it
+        _pool.close()
+    _pool = ConnectionPool(dsn, min_size=min_size, max_size=max_size,
+                           kwargs={"row_factory": dict_row}, open=True)
+    _pool.wait(timeout=10)                 # fail fast on a bad DSN (like sqlite's connect-time failure)
+    _create_schema()
 
 
-def _migrate() -> None:
-    """Idempotent, additive-only migrations on an existing DB (CREATE TABLE IF NOT EXISTS can't add a
-    column to a pre-existing table). Safe to run on every connect, on fresh and live ``monday.db``."""
-    cols = {r["name"] for r in _db().execute("PRAGMA table_info(recommendations)")}
-    if "signals_version" not in cols:        # B9/B13 — which immutable signals snapshot a rec was built from
-        _db().execute("ALTER TABLE recommendations ADD COLUMN signals_version TEXT")
+def _create_schema() -> None:
+    with _cur() as cur:
+        for stmt in (s.strip() for s in _SCHEMA.split(";")):
+            if stmt:
+                cur.execute(stmt)
+        _migrate(cur)
+
+
+def _migrate(cur) -> None:
+    """Idempotent, additive-only migrations (CREATE TABLE IF NOT EXISTS can't add a column to a
+    pre-existing table). Safe to run on every connect."""
+    # B9/B13 — which immutable signals snapshot a rec was built from.
+    cur.execute("ALTER TABLE recommendations ADD COLUMN IF NOT EXISTS signals_version TEXT")
 
 
 def close() -> None:
-    global _conn
-    with _LOCK:
-        if _conn is not None:
-            _conn.close()
-            _conn = None
+    global _pool
+    if _pool is not None:
+        _pool.close()
+        _pool = None
 
 
-def _db() -> sqlite3.Connection:
-    if _conn is None:
+@contextmanager
+def _cur():
+    """Borrow a pooled connection + cursor for one transaction (commit on clean exit, rollback on
+    error). Multi-statement atomic ops put all statements in a single ``with _cur()`` block."""
+    if _pool is None:
         raise RuntimeError("store not connected — call connect() first")
-    return _conn
+    with _pool.connection() as conn:
+        with conn.cursor() as cur:
+            yield cur
 
 
 def reset() -> dict[str, int]:
-    """Wipe ALL durable state (schema preserved) — a clean test/dev slate. Table names are
-    fixed constants, so the f-string is not an injection surface."""
-    with _LOCK:
-        counts = {t: _db().execute(f"DELETE FROM {t}").rowcount for t in _TABLES}
-        _db().commit()
-        return counts
+    """Wipe ALL durable state (schema preserved) — a clean test/dev slate. Table names are fixed
+    constants, so the f-string is not an injection surface. pipeline_lock is excluded (its seed row
+    must survive)."""
+    counts: dict[str, int] = {}
+    with _cur() as cur:
+        for t in _TABLES:
+            cur.execute(f"DELETE FROM {t}")
+            counts[t] = cur.rowcount
+    return counts
 
 
 # --------------------------------------------------------------------------
@@ -243,16 +257,15 @@ def reset() -> dict[str, int]:
 # --------------------------------------------------------------------------
 
 def kv_get(k: str, default: str | None = None) -> str | None:
-    with _LOCK:
-        row = _db().execute("SELECT v FROM kv WHERE k = ?", (k,)).fetchone()
+    with _cur() as cur:
+        row = cur.execute("SELECT v FROM kv WHERE k = %s", (k,)).fetchone()
         return row["v"] if row else default
 
 
 def kv_set(k: str, v: str) -> None:
-    with _LOCK:
-        _db().execute("INSERT INTO kv (k, v) VALUES (?, ?) "
-                      "ON CONFLICT(k) DO UPDATE SET v = excluded.v", (k, v))
-        _db().commit()
+    with _cur() as cur:
+        cur.execute("INSERT INTO kv (k, v) VALUES (%s, %s) "
+                    "ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v", (k, v))
 
 
 # --------------------------------------------------------------------------
@@ -262,38 +275,35 @@ def kv_set(k: str, v: str) -> None:
 def acquire_pipeline_lock(task_id: str, holder: str = "", stale_seconds: int = 1800) -> bool:
     """Take the single pipeline slot. Succeeds only if it's free OR the current holder's heartbeat is
     older than ``stale_seconds`` (a crashed run is reclaimed). One conditional UPDATE → atomic across
-    processes (sqlite serializes writers under WAL). Returns True iff acquired."""
+    processes (PG row lock). Returns True iff acquired."""
     now = _now()
     stale_before = (datetime.now(timezone.utc) - timedelta(seconds=stale_seconds)).isoformat()
-    with _LOCK:
-        cur = _db().execute(
-            "UPDATE pipeline_lock SET task_id=?, holder=?, started_at=?, heartbeat_at=? "
-            "WHERE id=1 AND (task_id IS NULL OR heartbeat_at < ?)",
+    with _cur() as cur:
+        cur.execute(
+            "UPDATE pipeline_lock SET task_id=%s, holder=%s, started_at=%s, heartbeat_at=%s "
+            "WHERE id=1 AND (task_id IS NULL OR heartbeat_at < %s)",
             (task_id, holder, now, now, stale_before))
-        _db().commit()
         return cur.rowcount == 1
 
 
 def heartbeat_pipeline_lock(task_id: str) -> None:
     """Refresh the holder's heartbeat so a long (legitimate) run isn't reclaimed as stale."""
-    with _LOCK:
-        _db().execute("UPDATE pipeline_lock SET heartbeat_at=? WHERE task_id=?", (_now(), task_id))
-        _db().commit()
+    with _cur() as cur:
+        cur.execute("UPDATE pipeline_lock SET heartbeat_at=%s WHERE task_id=%s", (_now(), task_id))
 
 
 def release_pipeline_lock(task_id: str) -> None:
     """Free the slot — only if ``task_id`` still owns it (never steals another run's lock)."""
-    with _LOCK:
-        _db().execute(
+    with _cur() as cur:
+        cur.execute(
             "UPDATE pipeline_lock SET task_id=NULL, holder=NULL, started_at=NULL, heartbeat_at=NULL "
-            "WHERE task_id=?", (task_id,))
-        _db().commit()
+            "WHERE task_id=%s", (task_id,))
 
 
 def pipeline_lock_holder() -> dict | None:
     """The current holder row ({task_id, holder, started_at, heartbeat_at}), or None if free."""
-    with _LOCK:
-        row = _db().execute(
+    with _cur() as cur:
+        row = cur.execute(
             "SELECT task_id, holder, started_at, heartbeat_at FROM pipeline_lock "
             "WHERE id=1 AND task_id IS NOT NULL").fetchone()
         return dict(row) if row else None
@@ -311,33 +321,32 @@ _REC_FIELDS = ("rec_id", "as_of_date", "symbol", "name", "direction", "entry_ref
 
 
 def add_recommendation(rec: dict) -> dict:
-    """Insert one recommendation (replace on same rec_id). JSON-list fields are encoded."""
-    vals = []
-    for f in _REC_FIELDS:
-        v = rec.get(f)
-        vals.append(_enc(v) if f in _JSON_COLS else v)
-    with _LOCK:
-        _db().execute(
-            f"INSERT OR REPLACE INTO recommendations ({','.join(_REC_FIELDS)}, created_at) "
-            f"VALUES ({','.join('?' * len(_REC_FIELDS))}, ?)", (*vals, _now()))
-        _db().commit()
+    """Insert one recommendation (upsert on rec_id). JSON-list fields are encoded."""
+    cols = (*_REC_FIELDS, "created_at")
+    vals = [_enc(rec.get(f)) if f in _JSON_COLS else rec.get(f) for f in _REC_FIELDS]
+    updates = ", ".join(f"{c}=EXCLUDED.{c}" for c in cols if c != "rec_id")
+    with _cur() as cur:
+        cur.execute(
+            f"INSERT INTO recommendations ({','.join(cols)}) "
+            f"VALUES ({','.join(['%s'] * len(cols))}) "
+            f"ON CONFLICT (rec_id) DO UPDATE SET {updates}", (*vals, _now()))
     return get_recommendation(rec["rec_id"])
 
 
 def get_recommendation(rec_id: str) -> dict | None:
-    with _LOCK:
-        return _row(_db().execute(
-            "SELECT * FROM recommendations WHERE rec_id = ?", (rec_id,)).fetchone())
+    with _cur() as cur:
+        return _row(cur.execute(
+            "SELECT * FROM recommendations WHERE rec_id = %s", (rec_id,)).fetchone())
 
 
 def list_recommendations(as_of_date: str | None = None) -> list[dict]:
-    with _LOCK:
+    with _cur() as cur:
         if as_of_date:
-            rows = _db().execute("SELECT * FROM recommendations WHERE as_of_date = ? "
-                                 "ORDER BY conviction DESC", (as_of_date,)).fetchall()
+            rows = cur.execute("SELECT * FROM recommendations WHERE as_of_date = %s "
+                               "ORDER BY conviction DESC", (as_of_date,)).fetchall()
         else:
-            rows = _db().execute("SELECT * FROM recommendations "
-                                 "ORDER BY as_of_date DESC, conviction DESC").fetchall()
+            rows = cur.execute("SELECT * FROM recommendations "
+                               "ORDER BY as_of_date DESC, conviction DESC").fetchall()
         return [_row(r) for r in rows]
 
 
@@ -347,40 +356,41 @@ def list_recommendations(as_of_date: str | None = None) -> list[dict]:
 
 def open_position(rec_id: str, symbol: str, direction: str, entry_price: float,
                   entry_date: str, qty: float = 1.0) -> dict:
-    with _LOCK:
-        _db().execute(
-            "INSERT OR REPLACE INTO paper_positions "
+    with _cur() as cur:
+        cur.execute(
+            "INSERT INTO paper_positions "
             "(rec_id, symbol, direction, entry_price, entry_date, qty, status) "
-            "VALUES (?,?,?,?,?,?, 'open')",
+            "VALUES (%s,%s,%s,%s,%s,%s, 'open') "
+            "ON CONFLICT (rec_id) DO UPDATE SET symbol=EXCLUDED.symbol, direction=EXCLUDED.direction, "
+            "entry_price=EXCLUDED.entry_price, entry_date=EXCLUDED.entry_date, qty=EXCLUDED.qty, "
+            "status='open'",
             (rec_id, symbol, direction, entry_price, entry_date, qty))
         # Re-opening voids any prior settlement (keeps a re-run idempotent: a rec is never both
-        # 'open' and settled). In normal daily ops rec_ids are date-stamped, so this is a no-op.
-        _db().execute("DELETE FROM outcomes WHERE rec_id = ?", (rec_id,))
-        _db().commit()
+        # 'open' and settled). Same transaction as the upsert.
+        cur.execute("DELETE FROM outcomes WHERE rec_id = %s", (rec_id,))
     return get_position(rec_id)
 
 
 def get_position(rec_id: str) -> dict | None:
-    with _LOCK:
-        return _row(_db().execute(
-            "SELECT * FROM paper_positions WHERE rec_id = ?", (rec_id,)).fetchone())
+    with _cur() as cur:
+        return _row(cur.execute(
+            "SELECT * FROM paper_positions WHERE rec_id = %s", (rec_id,)).fetchone())
 
 
 def list_positions(status: str | None = None) -> list[dict]:
-    with _LOCK:
+    with _cur() as cur:
         if status:
-            rows = _db().execute("SELECT * FROM paper_positions WHERE status = ? "
-                                 "ORDER BY entry_date DESC", (status,)).fetchall()
+            rows = cur.execute("SELECT * FROM paper_positions WHERE status = %s "
+                               "ORDER BY entry_date DESC", (status,)).fetchall()
         else:
-            rows = _db().execute("SELECT * FROM paper_positions "
-                                 "ORDER BY entry_date DESC").fetchall()
+            rows = cur.execute("SELECT * FROM paper_positions "
+                               "ORDER BY entry_date DESC").fetchall()
         return [_row(r) for r in rows]
 
 
 def close_position(rec_id: str) -> None:
-    with _LOCK:
-        _db().execute("UPDATE paper_positions SET status='closed' WHERE rec_id = ?", (rec_id,))
-        _db().commit()
+    with _cur() as cur:
+        cur.execute("UPDATE paper_positions SET status='closed' WHERE rec_id = %s", (rec_id,))
 
 
 # --------------------------------------------------------------------------
@@ -389,57 +399,63 @@ def close_position(rec_id: str) -> None:
 
 def add_mark(mark: dict) -> None:
     """Upsert one daily mark (PK rec_id+mark_date) — re-marking a day overwrites it."""
-    with _LOCK:
-        _db().execute(
-            "INSERT OR REPLACE INTO ledger_marks "
+    with _cur() as cur:
+        cur.execute(
+            "INSERT INTO ledger_marks "
             "(rec_id, mark_date, close_price, mtm_return, max_favorable, max_adverse, "
-            " tp_hit, sl_hit, days_held) VALUES (?,?,?,?,?,?,?,?,?)",
+            " tp_hit, sl_hit, days_held) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+            "ON CONFLICT (rec_id, mark_date) DO UPDATE SET close_price=EXCLUDED.close_price, "
+            "mtm_return=EXCLUDED.mtm_return, max_favorable=EXCLUDED.max_favorable, "
+            "max_adverse=EXCLUDED.max_adverse, tp_hit=EXCLUDED.tp_hit, sl_hit=EXCLUDED.sl_hit, "
+            "days_held=EXCLUDED.days_held",
             (mark["rec_id"], mark["mark_date"], mark.get("close_price"), mark.get("mtm_return"),
              mark.get("max_favorable"), mark.get("max_adverse"),
              1 if mark.get("tp_hit") else 0, 1 if mark.get("sl_hit") else 0,
              mark.get("days_held")))
-        _db().commit()
 
 
 def marks_for(rec_id: str) -> list[dict]:
-    with _LOCK:
-        rows = _db().execute("SELECT * FROM ledger_marks WHERE rec_id = ? "
-                             "ORDER BY mark_date", (rec_id,)).fetchall()
+    with _cur() as cur:
+        rows = cur.execute("SELECT * FROM ledger_marks WHERE rec_id = %s "
+                           "ORDER BY mark_date", (rec_id,)).fetchall()
         return [dict(r) for r in rows]
 
 
 def list_marks(mark_date: str | None = None) -> list[dict]:
-    with _LOCK:
+    with _cur() as cur:
         if mark_date:
-            rows = _db().execute("SELECT * FROM ledger_marks WHERE mark_date = ? "
-                                 "ORDER BY rec_id", (mark_date,)).fetchall()
+            rows = cur.execute("SELECT * FROM ledger_marks WHERE mark_date = %s "
+                               "ORDER BY rec_id", (mark_date,)).fetchall()
         else:
-            rows = _db().execute("SELECT * FROM ledger_marks "
-                                 "ORDER BY mark_date DESC, rec_id").fetchall()
+            rows = cur.execute("SELECT * FROM ledger_marks "
+                               "ORDER BY mark_date DESC, rec_id").fetchall()
         return [dict(r) for r in rows]
 
 
 def add_outcome(outcome: dict) -> None:
-    with _LOCK:
-        _db().execute(
-            "INSERT OR REPLACE INTO outcomes "
+    with _cur() as cur:
+        cur.execute(
+            "INSERT INTO outcomes "
             "(rec_id, exit_date, exit_price, realized_return, hit, tp_hit, sl_hit, "
-            " exit_reason, error) VALUES (?,?,?,?,?,?,?,?,?)",
+            " exit_reason, error) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+            "ON CONFLICT (rec_id) DO UPDATE SET exit_date=EXCLUDED.exit_date, "
+            "exit_price=EXCLUDED.exit_price, realized_return=EXCLUDED.realized_return, "
+            "hit=EXCLUDED.hit, tp_hit=EXCLUDED.tp_hit, sl_hit=EXCLUDED.sl_hit, "
+            "exit_reason=EXCLUDED.exit_reason, error=EXCLUDED.error",
             (outcome["rec_id"], outcome.get("exit_date"), outcome.get("exit_price"),
              outcome.get("realized_return"), 1 if outcome.get("hit") else 0,
              1 if outcome.get("tp_hit") else 0, 1 if outcome.get("sl_hit") else 0,
              outcome.get("exit_reason"), outcome.get("error")))
-        _db().commit()
 
 
 def get_outcome(rec_id: str) -> dict | None:
-    with _LOCK:
-        return _row(_db().execute("SELECT * FROM outcomes WHERE rec_id = ?", (rec_id,)).fetchone())
+    with _cur() as cur:
+        return _row(cur.execute("SELECT * FROM outcomes WHERE rec_id = %s", (rec_id,)).fetchone())
 
 
 def list_outcomes() -> list[dict]:
-    with _LOCK:
-        rows = _db().execute("SELECT * FROM outcomes ORDER BY exit_date DESC").fetchall()
+    with _cur() as cur:
+        rows = cur.execute("SELECT * FROM outcomes ORDER BY exit_date DESC").fetchall()
         return [dict(r) for r in rows]
 
 
@@ -450,26 +466,28 @@ def list_outcomes() -> list[dict]:
 def register_model(model_version: str, train_window: str = "", cv_ic: float | None = None,
                    factor_set: list | None = None, regime_weights: dict | None = None,
                    notes: str = "") -> dict:
-    with _LOCK:
-        _db().execute(
-            "INSERT OR REPLACE INTO model_registry "
+    with _cur() as cur:
+        cur.execute(
+            "INSERT INTO model_registry "
             "(model_version, trained_at, train_window, cv_ic, factor_set, regime_weights, notes) "
-            "VALUES (?,?,?,?,?,?,?)",
+            "VALUES (%s,%s,%s,%s,%s,%s,%s) "
+            "ON CONFLICT (model_version) DO UPDATE SET trained_at=EXCLUDED.trained_at, "
+            "train_window=EXCLUDED.train_window, cv_ic=EXCLUDED.cv_ic, factor_set=EXCLUDED.factor_set, "
+            "regime_weights=EXCLUDED.regime_weights, notes=EXCLUDED.notes",
             (model_version, _now(), train_window, cv_ic, _enc(factor_set or []),
              _enc(regime_weights or {}), notes))
-        _db().commit()
     return get_model(model_version)
 
 
 def get_model(model_version: str) -> dict | None:
-    with _LOCK:
-        return _row(_db().execute(
-            "SELECT * FROM model_registry WHERE model_version = ?", (model_version,)).fetchone())
+    with _cur() as cur:
+        return _row(cur.execute(
+            "SELECT * FROM model_registry WHERE model_version = %s", (model_version,)).fetchone())
 
 
 def list_models() -> list[dict]:
-    with _LOCK:
-        rows = _db().execute("SELECT * FROM model_registry ORDER BY trained_at DESC").fetchall()
+    with _cur() as cur:
+        rows = cur.execute("SELECT * FROM model_registry ORDER BY trained_at DESC").fetchall()
         return [_row(r) for r in rows]
 
 
@@ -483,24 +501,26 @@ def latest_model() -> dict | None:
 # --------------------------------------------------------------------------
 
 def add_calibration_run(run: dict) -> dict:
-    with _LOCK:
-        _db().execute(
-            "INSERT OR REPLACE INTO calibration_runs "
-            "(run_id, run_date, window, hit_rate, tp_hit_rate, avg_win, avg_loss, ic, "
-            " excess_vs_taiex, attribution, adjustments) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+    with _cur() as cur:
+        cur.execute(
+            "INSERT INTO calibration_runs "
+            '(run_id, run_date, "window", hit_rate, tp_hit_rate, avg_win, avg_loss, ic, '
+            " excess_vs_taiex, attribution, adjustments) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+            'ON CONFLICT (run_id) DO UPDATE SET run_date=EXCLUDED.run_date, "window"=EXCLUDED."window", '
+            "hit_rate=EXCLUDED.hit_rate, tp_hit_rate=EXCLUDED.tp_hit_rate, avg_win=EXCLUDED.avg_win, "
+            "avg_loss=EXCLUDED.avg_loss, ic=EXCLUDED.ic, excess_vs_taiex=EXCLUDED.excess_vs_taiex, "
+            "attribution=EXCLUDED.attribution, adjustments=EXCLUDED.adjustments",
             (run["run_id"], run.get("run_date"), run.get("window"), run.get("hit_rate"),
              run.get("tp_hit_rate"), run.get("avg_win"), run.get("avg_loss"), run.get("ic"),
              run.get("excess_vs_taiex"), _enc(run.get("attribution")),
              _enc(run.get("adjustments"))))
-        _db().commit()
-    with _LOCK:
-        return _row(_db().execute(
-            "SELECT * FROM calibration_runs WHERE run_id = ?", (run["run_id"],)).fetchone())
+        return _row(cur.execute(
+            "SELECT * FROM calibration_runs WHERE run_id = %s", (run["run_id"],)).fetchone())
 
 
 def list_calibration_runs() -> list[dict]:
-    with _LOCK:
-        rows = _db().execute("SELECT * FROM calibration_runs ORDER BY run_date DESC").fetchall()
+    with _cur() as cur:
+        rows = cur.execute("SELECT * FROM calibration_runs ORDER BY run_date DESC").fetchall()
         return [_row(r) for r in rows]
 
 
@@ -509,68 +529,61 @@ def list_calibration_runs() -> list[dict]:
 # --------------------------------------------------------------------------
 
 def get_memory(agent: str) -> dict | None:
-    with _LOCK:
-        return _row(_db().execute(
-            "SELECT agent, content, updated_at FROM memory WHERE agent = ?", (agent,)).fetchone())
+    with _cur() as cur:
+        return _row(cur.execute(
+            "SELECT agent, content, updated_at FROM memory WHERE agent = %s", (agent,)).fetchone())
 
 
 def set_memory(agent: str, content: str) -> dict:
     ts = _now()
-    with _LOCK:
-        _db().execute(
-            "INSERT INTO memory (agent, content, updated_at) VALUES (?,?,?) "
-            "ON CONFLICT(agent) DO UPDATE SET content=excluded.content, updated_at=excluded.updated_at",
+    with _cur() as cur:
+        cur.execute(
+            "INSERT INTO memory (agent, content, updated_at) VALUES (%s,%s,%s) "
+            "ON CONFLICT (agent) DO UPDATE SET content=EXCLUDED.content, updated_at=EXCLUDED.updated_at",
             (agent, content, ts))
-        _db().commit()
     return {"agent": agent, "content": content, "updated_at": ts}
 
 
 def list_memory() -> list[dict]:
-    with _LOCK:
-        rows = _db().execute("SELECT agent, content, updated_at FROM memory").fetchall()
+    with _cur() as cur:
+        rows = cur.execute("SELECT agent, content, updated_at FROM memory").fetchall()
         return [dict(r) for r in rows]
 
 
 def add_journal(body: str, title: str | None = None, date: str | None = None,
                 author: str = "reviewer-calibrator") -> dict:
-    with _LOCK:
-        cur = _db().execute(
-            "INSERT INTO journal (ts, date, author, title, body) VALUES (?,?,?,?,?)",
-            (_now(), date or _now()[:10], author, title, body))
-        _db().commit()
-        return dict(_db().execute(
-            "SELECT * FROM journal WHERE id = ?", (cur.lastrowid,)).fetchone())
+    with _cur() as cur:
+        return dict(cur.execute(
+            "INSERT INTO journal (ts, date, author, title, body) VALUES (%s,%s,%s,%s,%s) RETURNING *",
+            (_now(), date or _now()[:10], author, title, body)).fetchone())
 
 
 def list_journal(author: str | None = None, since: str | None = None) -> list[dict]:
     # since = inclusive YYYY-MM-DD lower bound on the journal date (the weekly review reads a window).
     clauses, params = [], []
     if author:
-        clauses.append("author = ?"); params.append(author)
+        clauses.append("author = %s"); params.append(author)
     if since:
-        clauses.append("date >= ?"); params.append(since)
+        clauses.append("date >= %s"); params.append(since)
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-    with _LOCK:
-        rows = _db().execute(
+    with _cur() as cur:
+        rows = cur.execute(
             f"SELECT * FROM journal{where} ORDER BY id DESC", params).fetchall()
         return [dict(r) for r in rows]
 
 
 def add_report(title: str, body: str, kind: str = "info") -> dict:
-    ts = _now()
-    with _LOCK:
-        cur = _db().execute("INSERT INTO report (ts, kind, title, body) VALUES (?,?,?,?)",
-                            (ts, kind, title, body))
-        _db().commit()
-        rid = cur.lastrowid
-    return {"id": rid, "ts": ts, "kind": kind, "title": title, "body": body}
+    with _cur() as cur:
+        return dict(cur.execute(
+            "INSERT INTO report (ts, kind, title, body) VALUES (%s,%s,%s,%s) RETURNING *",
+            (_now(), kind, title, body)).fetchone())
 
 
 def list_reports(kind: str | None = None) -> list[dict]:
-    with _LOCK:
+    with _cur() as cur:
         if kind:
-            rows = _db().execute("SELECT * FROM report WHERE kind = ? ORDER BY id DESC",
-                                 (kind,)).fetchall()
+            rows = cur.execute("SELECT * FROM report WHERE kind = %s ORDER BY id DESC",
+                               (kind,)).fetchall()
         else:
-            rows = _db().execute("SELECT * FROM report ORDER BY id DESC").fetchall()
+            rows = cur.execute("SELECT * FROM report ORDER BY id DESC").fetchall()
         return [dict(r) for r in rows]

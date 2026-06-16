@@ -6,6 +6,8 @@ import time
 import unittest
 from unittest import mock
 
+from tests.pgtest import TEST_DSN, fresh_store, requires_pg
+
 try:
     import fastapi  # noqa: F401
     import httpx    # noqa: F401
@@ -14,15 +16,17 @@ except Exception:
     HAVE = False
 
 
+@requires_pg
 @unittest.skipUnless(HAVE, "needs fastapi + httpx (TestClient)")
 class TestSystemAsync(unittest.TestCase):
     def _client(self):
         from monday.config import settings
-        settings.sqlite_path = ":memory:"
+        settings.database_url = TEST_DSN
+        fresh_store()                       # clean slate + release any leftover pipeline lock
         from fastapi.testclient import TestClient
 
         from monday import app as appmod
-        return TestClient(appmod.app)
+        return TestClient(appmod.app)        # lifespan reconnects to the same (clean) test DB
 
     def test_async_run_then_poll(self):
         from monday import store

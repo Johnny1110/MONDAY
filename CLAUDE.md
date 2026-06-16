@@ -41,10 +41,13 @@ veto. Output is **paper-portfolio only — no real money, ever.**
 4. **API prefixes split by module**, one `routers/` module each: `/api/universe` `prices` `factors`
    `features` `models` `signals` `recommendations` `portfolio` `ledger` `calibration` `chips` `news` `sentiment`
    `memory` `journal` `reports` `system` `admin` (admin is operator-only, never advertised to agents).
-5. **No Postgres/Redis.** Transactional persistent state = **sqlite** (recommendations / paper_portfolio /
-   ledger / calibration / model_registry / memory / journal / reports / kv); large feature/price tables =
-   **parquet** (read-only, analysis-friendly). The sqlite wrapper reuses **RLock write-lock + WAL/busy_timeout**
-   (Sunday's `store.py` pattern — multi-threaded writes won't deadlock).
+5. **Transactional persistent state = PostgreSQL** (engine-internal; recommendations / paper_portfolio /
+   ledger / calibration / model_registry / memory / journal / reports / kv / pipeline_lock). The DSN holds
+   creds and lives **engine-side only** (`DATABASE_URL` in `.env`), never exposed to agents (invariant 2).
+   Large feature/price tables = **parquet** (read-only, analysis-friendly). `store.py` uses a **psycopg
+   connection pool + PG MVCC** (one transaction per op). *(Cut over from sqlite on 2026-06-16, overriding
+   the original "No Postgres" decision — see `docs/adr/0001-sqlite-to-postgres.md`; the sqlite RLock/WAL
+   single-connection workaround is retired with it.)*
 6. **Pure logic is stdlib-only and unit-testable** (factor calc / indicators / pagination / calibration math
    IC·calibration·hit-rate·attribution / signal rules / mark-to-market). **Heavy deps (pandas/numpy/lightgbm/
    fastapi) are lazily imported** — never at module top level.
@@ -104,7 +107,7 @@ monday/
 └── engine/monday/            Python platform (FastAPI)                            ← to build
     ├── app.py                assembly (lifespan + router mounts + scheduler start/stop)
     ├── config.py             pydantic-settings (data-source keys live only here)
-    ├── store.py              sqlite + RLock write-lock + WAL
+    ├── store.py              PostgreSQL (psycopg pool); same API the rest of the engine calls
     ├── pagination.py         unified pagination envelope
     ├── ingest/               scraper adapters (TWSE/TPEx/FinMind/CMoney/Yahoo/Trends/news) + rate-limit + cache
     ├── clean.py              cleaning / split-adjustment / PIT alignment / quality gates
@@ -123,7 +126,7 @@ monday/
 
 ## Tech stack
 
-- Engine: Python ≥ 3.11, FastAPI + uvicorn, stdlib `sqlite3`, **parquet** (pyarrow) for large tables.
+- Engine: Python ≥ 3.11, FastAPI + uvicorn, **PostgreSQL** (psycopg 3 + psycopg_pool), **parquet** (pyarrow) for large tables.
 - ML: LightGBM/XGBoost (GBDT is the workhorse: Ranker/Regressor/Classifier three heads), numpy/pandas, SHAP
   attribution; DL (LSTM/GRU/TFT) **must beat GBDT on walk-forward OOS IC before it joins the ensemble** —
   otherwise it does not ship (§5.2).
@@ -174,7 +177,7 @@ monday/
   universe gate → PIT snapshot → featurestore → empty baseline model → ≤20 recommendations →
   mark-to-market) on **real free-core data** — `--source finmind|twse` pulls live TW prices
   through a cached, rate-limited, retrying ingest layer; idempotent re-runs. 17 token-free routers +
-  `/manual`; sqlite (appendix B schema) + parquet. **Vue 3 + TS dashboard** (Today / Signals / Portfolio /
+  `/manual`; PostgreSQL (appendix B schema) + parquet. **Vue 3 + TS dashboard** (Today / Signals / Portfolio /
   Calibration / Ledger / Reports / System / Manual; black-gold, SVG equity curve + calibration reliability
   diagram) built to `web/dist/` (committed) and served by FastAPI at `/`. `evva-swarm.yml` skeleton +
   `morgan` + `evva` (resident engineer). **34 unit tests green** + `vue-tsc` clean. Run: `python -m monday`

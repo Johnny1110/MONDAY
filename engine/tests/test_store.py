@@ -1,13 +1,15 @@
-"""sqlite store (invariant 5) — runs against :memory: (no parquet, no config)."""
+"""PostgreSQL store (invariant 5) — runs against a throwaway DB (skips when none reachable)."""
 
 import unittest
 
 from monday import store
+from tests.pgtest import fresh_store, requires_pg
 
 
+@requires_pg
 class TestStore(unittest.TestCase):
     def setUp(self):
-        store.connect(":memory:")
+        fresh_store()
 
     def tearDown(self):
         store.close()

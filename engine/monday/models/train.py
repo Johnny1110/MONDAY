@@ -119,7 +119,7 @@ def main(argv: list[str] | None = None) -> None:
     a = p.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
-    store.connect(settings.sqlite_path)
+    store.connect(settings.database_url, settings.db_pool_min, settings.db_pool_max)
     try:
         result = train(source=a.source, days=a.days, horizon=a.horizon, tp_pct=a.tp_pct,
                        n_splits=a.n_splits, embargo=a.embargo)

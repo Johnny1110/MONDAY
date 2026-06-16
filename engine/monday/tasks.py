@@ -1,7 +1,7 @@
 """Async task registry + the guarded pipeline runner (B7/B8/B10/B11).
 
 A pipeline run is long (5–300 s) and must be single-flight, so the HTTP endpoint can't run it inline
-(the client would time out — B10 — and concurrent retries would race the sqlite writer — B11). This
+(the client would time out — B10 — and concurrent retries would race on the store writer — B11). This
 module records each run as a KV-backed task (status / stage / message / result / error) the swarm polls
 via ``GET /api/system/tasks/{id}`` (B8), and ``runner`` drives one run end to end: it streams stage
 progress into the task, heartbeats the cross-process lock, fires the completion/failure webhook, and

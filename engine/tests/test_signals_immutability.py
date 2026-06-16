@@ -7,6 +7,8 @@ import tempfile
 import time
 import unittest
 
+from tests.pgtest import fresh_store, requires_pg
+
 try:
     import pyarrow  # noqa: F401
     import pydantic_settings  # noqa: F401
@@ -15,6 +17,7 @@ except Exception:
     HAVE_DEPS = False
 
 
+@requires_pg
 @unittest.skipUnless(HAVE_DEPS, "needs venv deps (pyarrow, pydantic-settings)")
 class TestSignalsImmutability(unittest.TestCase):
     def _run(self, **kw):
@@ -27,9 +30,8 @@ class TestSignalsImmutability(unittest.TestCase):
         from monday import pipeline, store
         from monday.config import settings
         with tempfile.TemporaryDirectory() as tmp:
-            settings.sqlite_path = ":memory:"
             settings.data_dir = os.path.join(tmp, "data")
-            store.connect(settings.sqlite_path)
+            fresh_store()
             try:
                 s = self._run(finalize=False)
                 as_of = s["as_of"]

@@ -1,7 +1,7 @@
 """Monday engine HTTP service — the platform plane (FastAPI, token-free).
 
 Thin assembly layer: each API group lives under ``routers/`` (invariant 4 — prefixes by
-module), durable state in ``store.py`` (sqlite) + parquet (``parquetio``). This file only wires
+module), durable state in ``store.py`` (PostgreSQL) + parquet (``parquetio``). This file only wires
 the routers, the system routes (``/health`` ``/manual`` ``/`` ``/dashboard``), and a boot probe
 of the swarm webhook. Everything is token-free (invariants 2 & 4): the engine holds the keys.
 """
@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, store
+from . import __version__, config, store
 from .config import settings
 from .routers import (admin, calibration, chips, factors, features, journal, ledger, memory,
                       models, news, portfolio, prices, recommendations, reports, sentiment,
@@ -44,8 +44,9 @@ async def _check_webhook_reachable() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    store.connect(settings.sqlite_path)
-    log.info("sqlite ready at %s; parquet data dir %s", settings.sqlite_path, settings.data_dir)
+    store.connect(settings.database_url, settings.db_pool_min, settings.db_pool_max)
+    log.info("postgres ready at %s; parquet data dir %s", config.redacted_database_url(),
+             settings.data_dir)
     await _check_webhook_reachable()
     yield
     store.close()

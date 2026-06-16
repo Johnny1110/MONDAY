@@ -6,6 +6,7 @@ import os
 import tempfile
 import unittest
 
+from tests.pgtest import fresh_store, requires_pg
 from tests.realdata import patched
 
 try:
@@ -26,15 +27,15 @@ class TestNoSyntheticSource(unittest.TestCase):
             get_source("synthetic")
 
 
+@requires_pg
 @unittest.skipUnless(HAVE_DEPS, "needs venv deps (pyarrow, pydantic-settings)")
 class TestPipelineSmoke(unittest.TestCase):
     def test_full_chain_end_to_end(self):
         from monday import pipeline, store
         from monday.config import settings
         with tempfile.TemporaryDirectory() as tmp:
-            settings.sqlite_path = ":memory:"
             settings.data_dir = os.path.join(tmp, "data")
-            store.connect(settings.sqlite_path)
+            fresh_store()
             try:
                 with patched():
                     s = pipeline.run(days=160, mark_forward=1)
@@ -54,9 +55,8 @@ class TestPipelineSmoke(unittest.TestCase):
         from monday import pipeline, store
         from monday.config import settings
         with tempfile.TemporaryDirectory() as tmp:
-            settings.sqlite_path = ":memory:"
             settings.data_dir = os.path.join(tmp, "data")
-            store.connect(settings.sqlite_path)
+            fresh_store()
             try:
                 with patched():
                     s = pipeline.run(days=160, mark_forward=1, finalize=False)

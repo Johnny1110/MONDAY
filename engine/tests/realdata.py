@@ -37,10 +37,11 @@ def run_smoke() -> dict:
     The offline exit gate invoked by scripts/smoke.sh."""
     from monday import pipeline, store
     from monday.config import settings
+    from tests.pgtest import TEST_DSN, fresh_store
     with tempfile.TemporaryDirectory() as tmp:
-        settings.sqlite_path = ":memory:"
+        settings.database_url = TEST_DSN
         settings.data_dir = os.path.join(tmp, "data")
-        store.connect(settings.sqlite_path)
+        fresh_store()
         try:
             with patched():
                 s = pipeline.run(days=160, mark_forward=1)

@@ -62,9 +62,12 @@ Monday 直接繼承 Sunday 的 8 條不變量精神，改寫成台股 lab 語境
 4. **API prefix 依模組劃分**：`/api/universe` `/api/prices` `/api/factors` `/api/features` `/api/models`
    `/api/signals` `/api/recommendations` `/api/portfolio` `/api/ledger` `/api/calibration` `/api/news`
    `/api/sentiment` `/api/memory` `/api/journal` `/api/reports` `/api/system` `/api/admin`，各自一個 router 模組。
-5. **無 Postgres/Redis。** 持久狀態 = sqlite（recommendations / paper_portfolio / ledger / calibration /
-   model_registry / memory / journal / reports / kv）+ 特徵/行情大表用 **parquet 檔**（唯讀分析友善）。
-   sqlite wrapper 沿用 **RLock 寫鎖 + WAL/busy_timeout**（Sunday `store.py` 模式，多執行緒寫不死鎖）。
+5. **交易型持久狀態 = PostgreSQL**（engine 內部；recommendations / paper_portfolio / ledger / calibration /
+   model_registry / memory / journal / reports / kv / pipeline_lock）+ 特徵/行情大表用 **parquet 檔**（唯讀分析友善）。
+   DSN 含帳密、只存在 engine 端（`.env` 的 `DATABASE_URL`），agent 永不可見（invariant 2）。`store.py` 用
+   **psycopg 連線池 + PG MVCC**（每個操作一個交易）。
+   > **⚠️ 修訂（2026-06-16）**：原為「無 Postgres/Redis、用 sqlite + RLock/WAL」，於 production 後由 User 指示
+   > 改用 PostgreSQL（B11 sqlite 單寫鎖瓶頸 + 擴展性）。詳見 `docs/adr/0001-sqlite-to-postgres.md`；§0.1 對應同步修訂。
 6. **純邏輯 stdlib-only、可單元測試**：因子計算 / 指標 / 分頁 / 校準數學（IC、calibration curve、命中率、
    歸因）/ 訊號規則 / 紙上投組對帳。**重依賴（pandas/numpy/lightgbm/ccxt/fastapi）惰性 import**，
    不在模組頂層。
@@ -126,7 +129,7 @@ Monday 直接繼承 Sunday 的 8 條不變量精神，改寫成台股 lab 語境
    │  featurestore（parquet）→ model_registry（版本化）→ daily inference                  │
    │  paper-portfolio + ledger（逐日對帳）→ calibration（IC/命中率/歸因）                 │
    │  triggers（回撤/漂移/失敗）─► events.post ─► swarm webhook；reports ─► telegram      │
-   │  sqlite（唯一交易型持久狀態：recs/portfolio/ledger/calibration/registry/memory/kv）  │
+   │  PostgreSQL（唯一交易型持久狀態：recs/portfolio/ledger/calibration/registry/memory/kv）│
    └───────────────────────────────────┬──────────────────────────────────────────────┘
                    資料 adapters         │（帳號/金鑰只在這層）
         TWSE/TPEx OpenAPI · FinMind · CMoney(free) · Yahoo TW · 新聞/法說 · Google Trends · PTT/Dcard
@@ -531,7 +534,7 @@ settings:
   retention_days: 90                 # ledger/journal 久存（校準要長歷史），event log 90 天後歸檔
 ```
 
-## 附錄 B：calibration ledger DDL（sqlite，草案）
+## 附錄 B：calibration ledger DDL（PostgreSQL；2026-06-16 由 sqlite 遷移，見 ADR 0001）
 
 ```sql
 CREATE TABLE recommendations (
