@@ -43,6 +43,8 @@ class TestPipelineSmoke(unittest.TestCase):
                 self.assertGreater(written, 0)
                 self.assertGreater(s["stages"]["snapshot"]["rows_on_disk"], 0)
                 self.assertGreater(s["stages"]["features"]["rows"], 0)
+                self.assertFalse(s["stages"]["features"]["degraded"])
+                self.assertEqual(s["stages"]["features"]["missing_symbols"], [])
                 self.assertGreater(s["stages"]["mark_to_market"]["day0"]["marked"], 0)
                 # every written idea is either still open or settled — nothing lost
                 self.assertEqual(s["portfolio"]["open"] + s["portfolio"]["closed"], written)

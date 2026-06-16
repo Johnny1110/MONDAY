@@ -221,8 +221,30 @@ def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
     degraded = signals.degraded_factors(feat_rows)        # B6: factors null across most of the universe
     if degraded:
         log.warning("degraded factors (thin history, null across ≥50%% of universe): %s", degraded)
+
+    # Verify features coverage vs universe: detect missing symbols from failed ingest / thin history.
+    # A modest gap is logged; a large gap marks the stage degraded so downstream agents know coverage
+    # is incomplete without blocking the whole run.
+    universe_syms = set(universe)
+    feat_syms = {r["symbol"] for r in feat_rows}
+    missing = sorted(universe_syms - feat_syms)
+    missing_n = len(missing)
+    universe_n = len(universe_syms)
+    features_degraded = False
+    if missing_n > 0:
+        log.warning("features missing %d/%d universe symbols%s",
+                    missing_n, universe_n,
+                    f": {missing[:20]}{'...' if missing_n > 20 else ''}" if missing_n <= 50 else "")
+        pct = missing_n / max(universe_n, 1)
+        if pct > 0.05 or missing_n > 10:
+            features_degraded = True
+            log.warning("features stage degraded — coverage gap %d/%d (%.1f%%)",
+                        missing_n, universe_n, pct * 100)
+
     out["stages"]["features"] = {"rows": len(feat_rows), "chips": source == "finmind",
-                                 "degraded_factors": degraded}
+                                 "degraded_factors": degraded,
+                                 "degraded": features_degraded,
+                                 "missing_symbols": missing if features_degraded else []}
 
     # 5 — inference (baseline momentum ranker, or a trained GBDT via --model gbdt)
     _emit("inference", f"model={model}")
