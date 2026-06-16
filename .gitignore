@@ -224,6 +224,8 @@ __marimo__/
 engine/monday.db
 engine/monday.db-wal
 engine/monday.db-shm
+# legacy root sqlite artifact (store is PostgreSQL now — ADR 0001); never re-track
+/monday.db*
 engine/data/
 engine/.env
 # evva swarm runtime + private per-agent memory (keep the .gitkeep placeholders)

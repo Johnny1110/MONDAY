@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     tp_floor_pct: float = 0.08         # … but TP is at least this (and at least E[ret])
     sl_pct_floor: float = 0.04         # clamp ATR stop to [floor, cap] so it never gets silly
     sl_pct_cap: float = 0.15
-    max_per_sector: int = 5             # risk gate: ≤N names per industry (§5.7)
+    max_per_sector: int = 6             # risk gate: ≤N names per industry (§5.7); 6 = constitution's ≤30% of 20 (B17). Override via MAX_PER_SECTOR.
     liquidity_adv_floor: float = 0.0    # risk gate: min 20d avg dollar volume (0 = off; universe gate already filters)
     universe_size: int = 500            # real sources: top-N listed names by liquidity (§4.1; launch 500, widen to 800-1000)
     ingest_max_workers: int = 8         # concurrent FinMind fetches for the daily universe pull (politely bounds throughput)

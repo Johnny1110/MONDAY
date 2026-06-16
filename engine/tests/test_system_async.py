@@ -40,7 +40,7 @@ class TestSystemAsync(unittest.TestCase):
                                            "degraded_factors": []}, "regime": "neutral"}}
 
         with self._client() as c, mock.patch("monday.pipeline.run", fake_run):
-            r = c.post("/api/system/run-pipeline?finalize=false&universe_size=30&symbols=2330,2317")
+            r = c.post("/api/system/run-pipeline?finalize=false&universe_size=30&symbols=2330,2317&post=false")
             self.assertEqual(r.status_code, 202)
             tid = r.json()["task_id"]
             t = {}

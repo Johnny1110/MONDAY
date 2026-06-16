@@ -9,6 +9,7 @@ so agents back off when the free tier is spent (B3b); /status reports token read
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from datetime import datetime, timezone
 
@@ -19,6 +20,7 @@ from .. import __version__, store, tasks
 from ..config import redacted_database_url, settings
 
 router = APIRouter(prefix="/api/system", tags=["system"])
+log = logging.getLogger("monday.routers.system")
 
 
 @router.get("/status")
@@ -41,16 +43,22 @@ def status() -> dict:
 
 
 @router.post("/run-pipeline")
-def run_pipeline(days: int = 180, mark_forward: int = 1, source: str = "finmind",
-                 model: str = "baseline", finalize: bool = True, post: bool = False,
+def run_pipeline(days: int = 180, mark_forward: int = 0, source: str = "finmind",
+                 model: str = "baseline", finalize: bool = True, post: bool = True,
                  notify: bool = False, universe_size: int | None = None,
                  symbols: str | None = None, as_of: str | None = None, force: bool = False):
     """Trigger the chain ASYNCHRONOUSLY (B10): returns ``{task_id, status:"running"}`` (202) at once and
     runs in the background — poll GET /api/system/tasks/{task_id}. Single-flight (B11): 409 if a
     pipeline is already running (HTTP or CLI). ``source`` 'finmind'|'twse'; ``model`` 'baseline'|'gbdt'.
     ``finalize=false`` stops after signals (the analyst overlay then POST /api/recommendations/finalize).
-    ``universe_size`` / ``symbols`` (comma list e.g. "2330,2317") scope the run (B5); ``force`` overwrites
-    signals even if the day is finalized (B9/B13)."""
+    ``mark_forward=0`` (LIVE default, B1) anchors as_of at the LATEST available close; use ≥1 only for
+    backtests with held-out future bars to mark against. ``post=true`` (default, B15) fires the
+    ``pipeline_complete`` webhook so the swarm leader wakes on completion — pass post=false only for
+    tests / ad-hoc local runs. ``universe_size`` / ``symbols`` (comma list e.g. "2330,2317") scope the
+    run (B5); ``force`` overwrites signals even if the day is finalized (B9/B13)."""
+    if not post:                                # B15: a quiet run won't auto-wake the swarm leader
+        log.warning("run-pipeline post=false — pipeline_complete webhook suppressed; the swarm leader "
+                    "won't be notified (intended only for tests / ad-hoc local runs)")
     from ..pipeline import run                  # lazy: keeps app import light
     params = {"days": days, "mark_forward": mark_forward, "source": source, "model": model,
               "finalize": finalize, "post": post, "notify": notify, "universe_size": universe_size,
