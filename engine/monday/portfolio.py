@@ -9,6 +9,7 @@ No real money ever (cardinal discipline 2 / whitepaper §9): a "position" is a b
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date
 
 from . import store
@@ -125,4 +126,54 @@ def summary() -> dict:
         "closed": len(outcomes),
         "win_rate": round(len(wins) / len(realized), 4) if realized else None,
         "avg_realized": round(sum(realized) / len(realized), 4) if realized else None,
+    }
+
+
+# --------------------------------------------------------------------------
+# Real equity curve + performance (Imp #3) — replaces the "mean mtm per day" proxy
+# --------------------------------------------------------------------------
+
+def equity_curve(marks: list[dict], base: float = 1.0) -> list[dict]:
+    """An equal-weight, daily-marked book NAV (pure). Each position's cumulative ``mtm_return`` is
+    differenced into daily increments (day0 ≈ 0, so entry doesn't jump the curve); the portfolio's daily
+    return is the mean increment across the positions marked that day; NAV compounds from ``base``. A
+    settled name simply stops contributing after its exit mark. Returns ``[{date, equity, ret, drawdown}]``
+    (``equity`` = NAV; ``drawdown`` ≤ 0). This is a real NAV — the ``portfolio_drawdown`` trigger and the
+    dashboard curve both read it (vs. the old "1 + mean mtm" proxy that never compounded)."""
+    by_rec: dict[str, list[tuple[str, float]]] = defaultdict(list)
+    for m in marks:
+        if m.get("mtm_return") is not None:
+            by_rec[m["rec_id"]].append((m["mark_date"], m["mtm_return"]))
+    daily: dict[str, list[float]] = defaultdict(list)
+    for series in by_rec.values():
+        series.sort()
+        prev = 0.0
+        for d, cum in series:
+            daily[d].append(cum - prev)        # daily increment in return space
+            prev = cum
+    out, nav, peak = [], base, base
+    for d in sorted(daily):
+        rets = daily[d]
+        r = sum(rets) / len(rets) if rets else 0.0
+        nav *= 1 + r
+        peak = max(peak, nav)
+        out.append({"date": d, "equity": round(nav, 4), "ret": round(r, 4),
+                    "drawdown": round((nav - peak) / peak, 4) if peak else 0.0})
+    return out
+
+
+def performance(curve: list[dict]) -> dict:
+    """Headline metrics from an equity curve (pure): cumulative return (vs base 1.0), max drawdown,
+    daily-return vol, and an annualized Sharpe (rf=0, 252d). All None on an empty curve."""
+    if not curve:
+        return {"days": 0, "cum_return": None, "max_drawdown": None, "vol": None, "sharpe": None}
+    rets = [p["ret"] for p in curve]
+    mean_r = sum(rets) / len(rets)
+    vol = (sum((x - mean_r) ** 2 for x in rets) / len(rets)) ** 0.5
+    return {
+        "days": len(curve),
+        "cum_return": round(curve[-1]["equity"] - 1.0, 4),
+        "max_drawdown": round(min(p["drawdown"] for p in curve), 4),
+        "vol": round(vol, 4),
+        "sharpe": round(mean_r / vol * (252 ** 0.5), 3) if vol else None,
     }

@@ -17,11 +17,11 @@ import logging
 import os
 import pathlib
 import time
-from collections import defaultdict
 from datetime import datetime, timezone
 
+from . import calibmap
 from . import clean as clean_mod
-from . import events, portfolio, regime as regime_mod, signals, snapshot, store, tasks, telegram, triggers
+from . import events, exits, portfolio, regime as regime_mod, signals, snapshot, store, tasks, telegram, triggers
 from .config import settings
 from .featurestore import build as fbuild
 from .ingest import get_source
@@ -36,21 +36,27 @@ def _build_rec(c: dict, as_of: str, model_version: str, regime: str, window: int
     max(model E[ret], 8%); SL fixed −8% — both multipliers are calibratable in P1 (§5.5).
     ``signals_version`` ties the idea to the exact immutable signals snapshot it came from (B9/B13)."""
     entry = c["close"]
-    tp_pct = max(c["predicted_return"], 0.08)
+    # ATR-scaled exits (§5.5, Imp #2); fixed ±8% fallback when atr_14 is missing.
+    tp_price, sl_price, exit_basis = exits.tp_sl_prices(
+        entry, c["predicted_return"], c.get("atr_14"), "long",
+        sl_atr_mult=settings.sl_atr_mult, tp_atr_mult=settings.tp_atr_mult,
+        tp_floor_pct=settings.tp_floor_pct, sl_pct_floor=settings.sl_pct_floor,
+        sl_pct_cap=settings.sl_pct_cap)
     return {
         "rec_id": f"{as_of}:{c['symbol']}",
         "as_of_date": as_of, "symbol": c["symbol"], "name": c.get("name"),
         "direction": "long",                     # MVP long-only (whitepaper §11 default)
         "entry_ref_price": entry,
         "predicted_return": c["predicted_return"],
-        "predicted_prob_tp": c["predicted_prob_tp"],
-        "conviction": c["predicted_prob_tp"],
+        "predicted_prob_tp": c["predicted_prob_tp"],          # raw signal (the ledger keeps calibrating it)
+        "conviction": c.get("conviction", c["predicted_prob_tp"]),  # ledger-calibrated (Imp #1) — morgan ranks on this
         "model_version": model_version,
         "feature_snapshot_id": as_of,
         "signals_version": signals_version,
         "regime_label": regime,
-        "take_profit_price": round(entry * (1 + tp_pct), 2),
-        "stop_loss_price": round(entry * (1 - 0.08), 2),
+        "take_profit_price": tp_price,
+        "stop_loss_price": sl_price,
+        "exit_basis": exit_basis,                # atr | fixed (shown in the envelope; prices are what persist)
         "holding_window_days": window,
         "contributing_factors": [k for k in ("mom_20d", "mom_60d", "mom_120d")
                                  if c.get(k) is not None and c[k] > 0],
@@ -68,7 +74,10 @@ def _rec_envelope(recs: list[dict], as_of: str, model_version: str, regime: str)
             "symbol": r["symbol"], "name": r["name"], "direction": r["direction"],
             "entry_ref": r["entry_ref_price"], "take_profit": r["take_profit_price"],
             "tp_pct": round((r["take_profit_price"] / r["entry_ref_price"] - 1) * 100, 1),
-            "stop_loss": r["stop_loss_price"], "holding_window_days": r["holding_window_days"],
+            "stop_loss": r["stop_loss_price"],
+            "sl_pct": round((1 - r["stop_loss_price"] / r["entry_ref_price"]) * 100, 1),
+            "exit_basis": r.get("exit_basis"),   # atr | fixed (Imp #2)
+            "holding_window_days": r["holding_window_days"],
             "conviction": r["conviction"], "factors": r["contributing_factors"],
             "analysts": r["contributing_analysts"], "rationale": r["rationale"],
             "risk_notes": r["risk_notes"],
@@ -96,12 +105,9 @@ def compose_recommendations(preds: list[dict], as_of: str, model_version: str,
 
 
 def _equity_curve() -> list[float]:
-    """A crude daily portfolio equity proxy from the ledger: 1 + mean mtm per mark date."""
-    by_date: dict[str, list[float]] = defaultdict(list)
-    for m in store.list_marks():
-        if m.get("mtm_return") is not None:
-            by_date[m["mark_date"]].append(m["mtm_return"])
-    return [1.0 + sum(v) / len(v) for _, v in sorted(by_date.items())]
+    """The real book NAV series (Imp #3) — a compounding equal-weight curve, not the old mean-mtm proxy.
+    Returned as a plain float list so triggers.max_drawdown reads it directly."""
+    return [p["equity"] for p in portfolio.equity_curve(store.list_marks())]
 
 
 def _enrich_chips(rows: list[dict], as_of: str, cache_dir: str) -> None:
@@ -131,6 +137,18 @@ def _infer(model: str, feat_rows: list[dict]) -> tuple[list[dict], str]:
                          factor_set=baseline.FACTOR_SET,
                          notes="P0 transparent cross-sectional momentum ranker")
     return baseline.infer(feat_rows), baseline.MODEL_VERSION
+
+
+def _fit_conviction_map() -> list:
+    """Fit the P(touch-TP) calibration map from settled outcomes × their rec's raw prob (§6/Imp #1)."""
+    pairs = []
+    for o in store.list_outcomes():
+        if o.get("hit") is None:
+            continue
+        rec = store.get_recommendation(o["rec_id"])
+        if rec and rec.get("predicted_prob_tp") is not None:
+            pairs.append((rec["predicted_prob_tp"], 1.0 if o["hit"] else 0.0))
+    return calibmap.fit(pairs, settings.calibration_min_samples)
 
 
 def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
@@ -209,7 +227,14 @@ def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
     # 5 — inference (baseline momentum ranker, or a trained GBDT via --model gbdt)
     _emit("inference", f"model={model}")
     preds, model_version = _infer(model, feat_rows)
-    out["stages"]["inference"] = {"model": model_version, "ranked": len(preds)}
+    # calibrate conviction from the ledger (§6): a raw P(touch-TP) is corrected toward realized hit
+    # frequency so morgan ranks the book on an honest number (identity until enough outcomes settle).
+    cmap = _fit_conviction_map()
+    store.kv_set("calibration_map", json.dumps(cmap))
+    for p in preds:
+        p["conviction"] = calibmap.apply(cmap, p.get("predicted_prob_tp"))
+    out["stages"]["inference"] = {"model": model_version, "ranked": len(preds),
+                                  "conviction_calibrated": bool(cmap)}
 
     # 6 — candidate signals (served at /api/signals/today + archived immutably at /api/signals/{date}).
     # B9/B13: once a day is finalized, a later/background prepare run must NOT clobber the signals

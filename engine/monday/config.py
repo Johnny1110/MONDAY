@@ -45,9 +45,16 @@ class Settings(BaseSettings):
     holding_window_days: int = 20       # ≤1-month swing window
     candidate_pool: int = 50            # top-N the model hands to the LLM overlay
     drawdown_trigger_pct: float = 8.0   # portfolio_drawdown webhook threshold
+    calibration_min_samples: int = 30   # min settled outcomes before the conviction calibration map kicks in (else identity)
     calibration_ic_floor: float = 0.0   # §6.3: rank-IC below this for N runs → calibration_drift → quant-researcher
     calibration_drift_weeks: int = 3    # consecutive sub-floor calibration runs before firing drift
     factor_decay_periods: int = 3       # a factor's contribution <0 for N consecutive runs → factor_decay
+    # exits (§5.5, Imp #2) — ATR-scaled TP/SL; fixed ±8% fallback when atr_14 is missing
+    sl_atr_mult: float = 2.0            # stop distance = N×ATR …
+    tp_atr_mult: float = 3.0           # take-profit distance ≥ N×ATR …
+    tp_floor_pct: float = 0.08         # … but TP is at least this (and at least E[ret])
+    sl_pct_floor: float = 0.04         # clamp ATR stop to [floor, cap] so it never gets silly
+    sl_pct_cap: float = 0.15
     max_per_sector: int = 5             # risk gate: ≤N names per industry (§5.7)
     liquidity_adv_floor: float = 0.0    # risk gate: min 20d avg dollar volume (0 = off; universe gate already filters)
     universe_size: int = 500            # real sources: top-N listed names by liquidity (§4.1; launch 500, widen to 800-1000)

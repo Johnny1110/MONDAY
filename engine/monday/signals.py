@@ -51,7 +51,8 @@ def build_envelope(as_of: str, model_version: str, regime: str,
             "score": round(c["score"], 4),
             "close": c["close"],
             "predicted_return": c["predicted_return"],
-            "predicted_prob_tp": c["predicted_prob_tp"],
+            "predicted_prob_tp": c["predicted_prob_tp"],            # raw P(touch-TP)
+            "conviction": c.get("conviction", c.get("predicted_prob_tp")),  # ledger-calibrated (Imp #1)
             "adv_20d": c.get("adv_20d"),          # carried for the §5.7 liquidity gate at finalize
             "factors": {k: c.get(k) for k in _ENVELOPE_KEYS},   # momentum + technical + chips (read by the overlay)
         } for c in cands],

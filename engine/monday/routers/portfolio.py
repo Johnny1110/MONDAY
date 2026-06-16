@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
-
 from fastapi import APIRouter
 
 from .. import pagination
@@ -28,15 +26,15 @@ def portfolio_summary() -> dict:
 
 @router.get("/equity")
 def equity() -> list[dict]:
-    """Daily portfolio equity proxy from the ledger: 1 + mean mtm per mark date (drives the
-    dashboard equity curve). A small time series — returned whole, not paginated."""
-    by_date: dict[str, list[float]] = defaultdict(list)
-    for m in store.list_marks():
-        if m.get("mtm_return") is not None:
-            by_date[m["mark_date"]].append(m["mtm_return"])
-    return [{"date": d, "equity": round(1 + sum(v) / len(v), 4),
-             "mean_mtm": round(sum(v) / len(v), 4), "n": len(v)}
-            for d, v in sorted(by_date.items())]
+    """The book's real equal-weight NAV curve (Imp #3): [{date, equity, ret, drawdown}] — compounding,
+    not the old mean-mtm proxy. Drives the dashboard curve + the drawdown trigger. Small series, whole."""
+    return portfolio_mod.equity_curve(store.list_marks())
+
+
+@router.get("/performance")
+def performance() -> dict:
+    """Headline metrics from the equity curve: cumulative return, max drawdown, daily vol, Sharpe."""
+    return portfolio_mod.performance(portfolio_mod.equity_curve(store.list_marks()))
 
 
 @router.get("/risk")
