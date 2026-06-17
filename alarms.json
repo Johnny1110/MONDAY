@@ -1,12 +1,32 @@
 [
   {
-    "id": "alm_l70agalf",
-    "fire_at": "2026-06-16T08:00:00+08:00",
-    "prompt": "Re-check /api/chips for all 27 candidates from Task #4 (2026-06-15 signals). FinMind daily quota was exhausted on 6/15 (402). Try /api/chips?symbol=2330\u0026as_of=2026-06-15 first — if it works, fetch all 27 candidates and complete the chips overlay analysis. Then send results to morgan. If still 402/500, report to morgan that chips data remains unavailable.",
-    "label": "Re-check FinMind chips quota",
+    "id": "alm_h67njk8n",
+    "fire_at": "2026-06-17T14:30:00+08:00",
+    "prompt": "每日對帳：POST /api/ledger/reconcile?source=finmind → GET /api/ledger/marks、/api/portfolio、/api/portfolio/equity。重點追蹤：① 跨表 entry price 是否仍一致（加回 0.6% cost 後驗算）；② 有無實質 TP/SL 觸發（ATR-scaled，非看 ±8%）；③ 權益曲線變動。異常通報 morgan，收工前 POST /api/journal（author=reviewer-calibrator）。",
+    "label": "6/17 盤後對帳",
     "durable": true,
-    "created": "2026-06-15T23:12:41.49874+08:00",
-    "target": "a-chips",
-    "origin": "a-chips"
+    "created": "2026-06-16T23:17:06.213089+08:00",
+    "target": "reviewer-calibrator",
+    "origin": "reviewer-calibrator"
+  },
+  {
+    "id": "alm_67yjvcb6",
+    "fire_at": "2026-06-18T14:30:00+08:00",
+    "prompt": "每日對帳 Day 3（持有 as_of=2026-06-15 部位）：POST /api/ledger/reconcile?source=finmind → GET /api/ledger/marks、outcomes、portfolio、equity。重點：① BOSS 3042 晶技續跌？距 SL（206.97）還有多遠？② 有無新 TP/SL 結算；③ 成本交叉驗證仍一致？④ 權益曲線。異常通報 morgan。收工前 POST /api/journal。",
+    "label": "6/18 盤後對帳 Day 3",
+    "durable": true,
+    "created": "2026-06-17T21:05:24.934252+08:00",
+    "target": "reviewer-calibrator",
+    "origin": "reviewer-calibrator"
+  },
+  {
+    "id": "alm_qrbt71xn",
+    "fire_at": "2026-11-15T09:00:00+08:00",
+    "prompt": "Task #11: Re-validate H3 contract liabilities QoQ factor. Pull latest FinMind TaiwanStockBalanceSheet data for heavy electrical stocks (1503,1504,1513,1514,1519,2371), compute CL QoQ vs next-Q revenue QoQ rank IC. If n ≥ 100 and p \u003c 0.10, task_propose to add CL QoQ to fundamental factor group. Check if FinMind data is up to date through Q3 2026.",
+    "label": "H3 CL QoQ re-validation Q3 2026",
+    "durable": true,
+    "created": "2026-06-17T00:29:15.996861+08:00",
+    "target": "quant-researcher",
+    "origin": "quant-researcher"
   }
 ]

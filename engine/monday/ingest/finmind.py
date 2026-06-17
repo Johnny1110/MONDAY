@@ -235,3 +235,42 @@ def fetch_balance_sheets(symbols, start, end=None, token: str = "",
     def one(s):
         return s, fetch_balance_sheet(s, start, end, token, cache_dir, min_interval=0.0)
     return dict(_bulk(list(symbols), one, "balance_sheets"))
+
+
+# ── TaiwanStockPER (§4.3 基本面) ─────────────────────────────────────────────
+# Daily PER / PBR / dividend-yield. FinMind returns one row per (stock_id, date).
+# Columns: date, stock_id, dividend_yield (float64), PER (float64), PBR (float64).
+# Data range 2005-10-01 ~ now, updated Mon-Fri 18:00. Cache TTL 6 h (daily update).
+
+def parse_per(payload: dict | None) -> list[dict]:
+    """TaiwanStockPER JSON → [{date, stock_id, per, pbr, dividend_yield}], ascending by date."""
+    if not payload or payload.get("status") != 200:
+        return []
+    rows = []
+    for r in payload.get("data") or []:
+        try:
+            rows.append({"date": r["date"], "stock_id": str(r["stock_id"]),
+                         "per": float(r["PER"]), "pbr": float(r["PBR"]),
+                         "dividend_yield": float(r["dividend_yield"])})
+        except (KeyError, TypeError, ValueError):
+            continue
+    return sorted(rows, key=lambda x: x["date"])
+
+
+def fetch_per(symbol: str, start, end=None, token: str = "",
+              cache_dir: str | None = None,
+              ttl: float = 21600, min_interval: float = 0.6) -> list[dict]:
+    """Daily PER/PBR/dividend-yield rows for ``symbol``.
+    Returns [{date, stock_id, per, pbr, dividend_yield}]."""
+    return parse_per(
+        _chip_fetch("TaiwanStockPER", symbol, start, end, token, cache_dir, ttl,
+                    min_interval))
+
+
+def fetch_pers(symbols, start, end=None, token: str = "",
+               cache_dir: str | None = None) -> dict[str, list[dict]]:
+    """{symbol: [PER rows]} for the universe — concurrent, month-anchored cache,
+    graceful partial on quota."""
+    def one(s):
+        return s, fetch_per(s, start, end, token, cache_dir, min_interval=0.0)
+    return dict(_bulk(list(symbols), one, "pers"))

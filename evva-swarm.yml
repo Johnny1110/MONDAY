@@ -97,7 +97,7 @@ workers:
 settings:
   permission_mode: bypass            # unattended 7×24 (operator-confirmed; paper portfolio, no real money)
   max_iterations: 99
-  daily_budget_tokens: 4000000       # per-member daily cap (morgan / reviewer-calibrator / quant-researcher use the -1 exemption; evva is ticket-driven)
+  daily_budget_tokens: -1       # per-member daily cap (morgan / reviewer-calibrator / quant-researcher use the -1 exemption; evva is ticket-driven)
   stall_hard_timeout: "2h"           # hard timeout for long code runs / training jobs
   task_stale_threshold: "24h"
   mailbox_stale_threshold: "30m"
