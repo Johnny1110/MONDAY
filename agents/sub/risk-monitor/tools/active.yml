@@ -6,3 +6,4 @@
 - bash          # ad-hoc execution; durable code & new APIs go through morgan → evva
 - read          # docs/PRD tickets, teammates' memory dirs
 - write         # native memory (active: unlocks the memory protocol)
+- todo_write

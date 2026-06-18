@@ -5,5 +5,10 @@
 - bash          # training runs, walk-forward CV scripts (the heavy compute lives here)
 - calc          # one-off arithmetic
 - web_search    # factor / method research (papers, prior art) — validate before proposing
+- web_fetch
 - read          # docs/PRD tickets, teammates' memory dirs
 - write         # native memory (active: unlocks the memory protocol — research notebook)
+- grep
+- tree
+- glob
+- todo_write

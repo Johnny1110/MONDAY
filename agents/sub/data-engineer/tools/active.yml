@@ -7,3 +7,4 @@
 - bash          # ad-hoc execution; reusable ingest / scripts go through morgan → evva
 - read          # docs/PRD tickets, teammates' memory dirs
 - write         # native memory (active: unlocks the memory protocol)
+- todo_write

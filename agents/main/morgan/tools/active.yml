@@ -6,5 +6,11 @@
 - calc          # portfolio / position arithmetic — decisions are never mental math
 - bash          # ad-hoc execution / quick checks; durable code & new APIs go to evva as a PRD
 - web_search    # quick verification of a teammate's claim / breaking news (deep research is delegated)
+- web-fetch
 - read          # docs/PRD tickets, teammates' memory dirs
 - write         # the strategy constitution + native memory (active: unlocks the memory protocol)
+- tree
+- grep
+- glob
+- repl
+- todo_write

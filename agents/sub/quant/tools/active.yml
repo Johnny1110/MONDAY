@@ -6,3 +6,4 @@
 - bash          # ad-hoc execution beyond the python repl; durable code goes through morgan → evva
 - read          # docs/PRD tickets, teammates' memory dirs
 - write         # native memory (active: unlocks the memory protocol)
+- todo_write
