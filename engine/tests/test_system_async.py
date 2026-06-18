@@ -102,6 +102,45 @@ class TestSystemAsync(unittest.TestCase):
             self.assertEqual(store.get_recommendation("2026-06-16:2330")["signals_version"],
                              "2026-06-16#fv")
 
+    def test_finalize_replaces_not_appends(self):
+        """Each finalize is a complete new book — old open positions are closed, not accumulated."""
+        from monday import store
+        from monday.ingest import finmind
+        env = {"as_of_date": "2026-06-17", "model_version": "baseline-0",
+               "signals_version": "2026-06-17#fv", "regime": "neutral", "candidate_count": 3,
+               "candidates": [
+                   {"symbol": "2330", "name": "TSMC", "rank": 1, "score": 0.5, "close": 100.0,
+                    "predicted_return": 0.05, "predicted_prob_tp": 0.6, "adv_20d": 1e6,
+                    "factors": {"mom_20d": 0.1}},
+                   {"symbol": "2317", "name": "HonHai", "rank": 2, "score": 0.4, "close": 80.0,
+                    "predicted_return": 0.03, "predicted_prob_tp": 0.55, "adv_20d": 2e6,
+                    "factors": {"mom_20d": 0.05}},
+                   {"symbol": "2454", "name": "MTK", "rank": 3, "score": 0.35, "close": 600.0,
+                    "predicted_return": 0.04, "predicted_prob_tp": 0.5, "adv_20d": 1.5e6,
+                    "factors": {"mom_20d": 0.08}},
+               ]}
+        with self._client() as c, mock.patch.object(finmind, "fetch_stock_info", lambda *a, **k: {}):
+            store.kv_set("signals_today", json.dumps(env))
+            # First finalize: pick 2 symbols
+            r1 = c.post("/api/recommendations/finalize", json={"symbols": ["2330", "2317"]})
+            self.assertEqual(r1.status_code, 200, r1.text)
+            open_pos = store.list_positions(status="open")
+            self.assertEqual(len(open_pos), 2)
+            open_syms = {p["symbol"] for p in open_pos}
+            self.assertEqual(open_syms, {"2330", "2317"})
+
+            # Second finalize: pick 1 different symbol — old 2 should close, only 1 open
+            r2 = c.post("/api/recommendations/finalize", json={"symbols": ["2454"]})
+            self.assertEqual(r2.status_code, 200, r2.text)
+            open_pos = store.list_positions(status="open")
+            self.assertEqual(len(open_pos), 1)
+            self.assertEqual(open_pos[0]["symbol"], "2454")
+
+            # No duplicates — only one position per symbol exists at any time
+            all_pos = store.list_positions()
+            sym_status = {(p["symbol"], p["status"]) for p in all_pos}
+            self.assertEqual(sym_status, {("2454", "open"), ("2330", "closed"), ("2317", "closed")})
+
 
 if __name__ == "__main__":
     unittest.main()

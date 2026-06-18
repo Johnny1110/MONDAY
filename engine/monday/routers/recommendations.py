@@ -60,6 +60,12 @@ def finalize(payload: dict) -> dict:
     if not chosen:
         raise HTTPException(status_code=422,
                             detail="none of the requested symbols are in today's candidates")
+    # Close all open positions first — finalize replaces the book, not appends to it.
+    # This keeps total_open ≤ max_recommendations and prevents duplicate symbol exposure
+    # from prior-day entries coexisting with the new composition.
+    for pos in store.list_positions(status="open"):
+        store.close_position(pos["rec_id"])
+
     import pathlib
 
     from .. import risk
