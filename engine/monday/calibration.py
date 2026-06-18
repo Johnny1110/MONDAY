@@ -104,16 +104,28 @@ def reliability_gap(curve: list[dict]) -> float | None:
 
 
 def attribution(rows: list[dict], key: str) -> dict:
-    """Mean realized return grouped by ``key`` (a scalar like regime, or a list like factors/
-    analysts). Tells the review SOP which factor/regime/analyst actually made money (§6.4)."""
+    """Mean realized return grouped by ``key``.
+
+    When ``key`` is a scalar (e.g. regime_label), the full return is assigned to that single group.
+    When ``key`` is a list (e.g. contributing_factors), the return is split EQUALLY among the list
+    members — so each factor only gets its fair share, and the factor-level means are genuinely
+    differentiated rather than flat copies of the overall mean (§6.4)."""
     agg: dict = {}
     for r in rows:
         rr = r.get("realized_return")
         if rr is None:
             continue
         g = r.get(key)
-        for gg in (g if isinstance(g, list) else [g]):
-            if gg is None:
+        if isinstance(g, list):
+            if not g:
                 continue
-            agg.setdefault(gg, []).append(rr)
+            split = rr / len(g)
+            for gg in g:
+                if gg is None:
+                    continue
+                agg.setdefault(str(gg), []).append(split)
+        else:
+            if g is None:
+                continue
+            agg.setdefault(str(g), []).append(rr)
     return {str(k): {"mean": round(sum(v) / len(v), 4), "n": len(v)} for k, v in agg.items()}

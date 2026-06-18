@@ -28,12 +28,33 @@ class TestCalibration(unittest.TestCase):
             self.assertGreaterEqual(set(b), {"bin", "mean_pred", "observed", "n"})
 
     def test_attribution_list_key(self):
+        """Returns split equally among contributing factors — each factor gets realized_return / n."""
         rows = [{"contributing_factors": ["mom_20d", "mom_60d"], "realized_return": 0.1},
                 {"contributing_factors": ["mom_20d"], "realized_return": -0.1}]
         att = c.attribution(rows, "contributing_factors")
+        # Row 1: mom_20d += 0.05, mom_60d += 0.05. Row 2: mom_20d += -0.1
+        # mom_20d: [0.05, -0.1] → mean = -0.025
+        # mom_60d: [0.05] → mean = 0.05
         self.assertEqual(att["mom_20d"]["n"], 2)
-        self.assertAlmostEqual(att["mom_20d"]["mean"], 0.0)
-        self.assertAlmostEqual(att["mom_60d"]["mean"], 0.1)
+        self.assertAlmostEqual(att["mom_20d"]["mean"], -0.025)
+        self.assertEqual(att["mom_60d"]["n"], 1)
+        self.assertAlmostEqual(att["mom_60d"]["mean"], 0.05)
+
+    def test_attribution_scalar_key_unchanged(self):
+        """Scalar keys (e.g. regime_label) still get the full return — splitting only applies to lists."""
+        rows = [{"regime_label": "bull_trend", "realized_return": 0.1},
+                {"regime_label": "bull_trend", "realized_return": -0.05},
+                {"regime_label": "choppy", "realized_return": 0.02}]
+        att = c.attribution(rows, "regime_label")
+        self.assertEqual(att["bull_trend"]["n"], 2)
+        self.assertAlmostEqual(att["bull_trend"]["mean"], 0.025)
+        self.assertEqual(att["choppy"]["n"], 1)
+        self.assertAlmostEqual(att["choppy"]["mean"], 0.02)
+
+    def test_attribution_empty_list_skipped(self):
+        rows = [{"contributing_factors": [], "realized_return": 0.1}]
+        att = c.attribution(rows, "contributing_factors")
+        self.assertEqual(att, {})
 
     def test_brier_perfect_vs_overconfident(self):
         self.assertEqual(c.brier([1.0, 0.0, 1.0], [True, False, True]), 0.0)   # perfect
