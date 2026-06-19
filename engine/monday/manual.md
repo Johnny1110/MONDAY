@@ -110,6 +110,13 @@ it NEVER places an order** (invariant 11, you are the air-gap; no broker integra
 - `GET /api/book/actions?since=&position_id=` — the append-only lifecycle log (paginated; calibration
   + the weekly review read it).
 - `GET /api/book/exposure?book=` — current gross/net/cash/by-sector exposure (risk-monitor's GATE 2 input).
+- `POST /api/book/review` — daily hold/add/trim/exit review of the **whole open book** (A5, §倉位管理),
+  runs even on a no-new-ideas day. Body `{as_of?, book?, context:{<symbol>:{price?, conviction?,
+  thesis_intact?, technical_break?, chips_reversal?, theme_exhausted?, regime_state?}}}` — the engine
+  fills mechanical fields (avg_entry/tp/sl/days_held) and merges your qualitative flags; missing flags
+  default conservatively. Returns one `{action ∈ hold|add|trim|exit, reason, urgency,
+  suggested_delta_pct, updated_tp, updated_sl}` per lot. **Advisory** — execute via `/api/book/fill`.
+  `GET /api/book/review` is the mechanical-only baseline (no flags).
 - `POST /api/book/sizing` — suggest sizes for a set of candidates (A4, §倉位管理): body
   `{candidates:[{symbol, conviction, atr_stop_pct?|stop_loss?, price, sector?}], regime_state?,
   book_value?, book?}`. Risk-budget × conviction × regime scale, capped per-name and in aggregate;

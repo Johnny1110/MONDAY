@@ -13,7 +13,7 @@ from datetime import date
 from fastapi import APIRouter, HTTPException
 
 from .. import book as book_mod
-from .. import pagination, sizing as sizing_mod, store
+from .. import pagination, review as review_mod, sizing as sizing_mod, store
 from ..config import settings
 
 router = APIRouter(prefix="/api/book", tags=["book"])
@@ -109,6 +109,54 @@ def actions(since: str | None = None, position_id: str | None = None,
 def exposure_view(book: str | None = None) -> dict:
     """Current exposure/cash/by-sector for ``book`` (risk-monitor's GATE 2 input, A4/B4)."""
     return book_mod.book_exposure(book or settings.book_mode)
+
+
+def _days_held(opened_at: str | None, as_of: str | None) -> int:
+    try:
+        return (date.fromisoformat(as_of) - date.fromisoformat(opened_at)).days
+    except (ValueError, TypeError):
+        return 0
+
+
+def _review_cfg() -> dict:
+    return {"holding_window_days": settings.holding_window_days,
+            "review_trim_profit_pct": settings.review_trim_profit_pct,
+            "review_add_conviction": settings.review_add_conviction,
+            "review_trail_to_be_pct": settings.review_trail_to_be_pct}
+
+
+def _do_review(context: dict, as_of: str | None, book: str) -> dict:
+    """Assemble mechanical context (avg_entry/tp/sl/days_held from the book + latest price) per open lot,
+    merge the caller's qualitative flags, and run the A5 policy. Runs on the whole open book — even on a
+    no-new-ideas day (§flow gate)."""
+    as_of = as_of or store.kv_get("last_as_of")
+    prices = book_mod._latest_prices()                  # noqa: SLF001 — shared PIT price helper
+    cfg = _review_cfg()
+    reviews = []
+    for p in store.list_book_positions(book=book, status="open"):
+        sym = p["symbol"]
+        ctx = dict(context.get(sym) or {})
+        ctx.setdefault("price", prices.get(sym))
+        pos = {**p, "days_held": _days_held(p.get("opened_at"), as_of),
+               "holding_window": settings.holding_window_days}
+        reviews.append(review_mod.review_position(pos, ctx, cfg))
+    return {"book": book, "as_of": as_of, "count": len(reviews), "reviews": reviews}
+
+
+@router.post("/review")
+def review(payload: dict) -> dict:
+    """Daily hold/add/trim/exit review of the whole open book (A5). Body: ``{as_of?, book?,
+    context:{<symbol>:{price?, conviction?, thesis_intact?, technical_break?, chips_reversal?,
+    theme_exhausted?, regime_state?}}}``. Missing flags default conservatively. **Advisory** — morgan/
+    User execute via POST /api/book/fill; this never moves money (invariant 11)."""
+    return _do_review(payload.get("context") or {}, payload.get("as_of"),
+                      payload.get("book") or settings.book_mode)
+
+
+@router.get("/review")
+def review_baseline(book: str | None = None) -> dict:
+    """Mechanical-only baseline review (no qualitative flags) — for the dashboard / a quick check."""
+    return _do_review({}, None, book or settings.book_mode)
 
 
 @router.post("/sizing")

@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     risk_budget_pct_per_trade: float = 1.0    # % of book risked if the stop is hit (never raised to chase 10%)
     max_total_exposure_pct: float = 100.0     # cap on summed position weights (≤100 → no leverage)
     lot_size: int = 1000                      # TW board lot
+    # daily position review (A5) — hold/add/trim/exit policy thresholds (§6-calibratable)
+    review_trim_profit_pct: float = 0.10      # min gain to de-risk a winner in risk_off
+    review_add_conviction: float = 0.65       # min conviction to recommend adding to a lot
+    review_trail_to_be_pct: float = 0.08      # raise SL toward breakeven after +this gain
 
     # --- 2.0 macro plane (A2; world indices for the top-down read) ----------------
     # Free, key-less Yahoo chart source (decision 6); PIT-snapshotted like prices. asset_class ∈
