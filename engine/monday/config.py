@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     book_mode: str = "paper"                  # paper | real
     book_starting_cash: float = 1_000_000.0   # NT$ notional, basis for sizing/exposure math (A4)
     book_max_position_pct: float = 20.0       # hard per-name cap as % of book (A4 sizing + risk gate read it)
+    # position sizing (A4) — risk-budget × conviction × regime scale, capped; no leverage, decision 4
+    risk_budget_pct_per_trade: float = 1.0    # % of book risked if the stop is hit (never raised to chase 10%)
+    max_total_exposure_pct: float = 100.0     # cap on summed position weights (≤100 → no leverage)
+    lot_size: int = 1000                      # TW board lot
 
     # --- 2.0 macro plane (A2; world indices for the top-down read) ----------------
     # Free, key-less Yahoo chart source (decision 6); PIT-snapshotted like prices. asset_class ∈

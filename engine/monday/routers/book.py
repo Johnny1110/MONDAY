@@ -7,12 +7,13 @@ places an order** (invariant 11; the User is the air-gap). No broker integration
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
 from fastapi import APIRouter, HTTPException
 
 from .. import book as book_mod
-from .. import pagination, store
+from .. import pagination, sizing as sizing_mod, store
 from ..config import settings
 
 router = APIRouter(prefix="/api/book", tags=["book"])
@@ -20,6 +21,19 @@ router = APIRouter(prefix="/api/book", tags=["book"])
 
 def _today() -> str:
     return date.today().isoformat()
+
+
+def _today_regime() -> str:
+    """The latest run's regime/risk-state, for default sizing scale (neutral if unknown)."""
+    as_of = store.kv_get("last_as_of")
+    if as_of:
+        meta = json.loads(store.kv_get(f"predictions_meta:{as_of}") or "{}")
+        if meta.get("regime"):
+            return meta["regime"]
+    raw = store.kv_get("signals_today")
+    if raw:
+        return json.loads(raw).get("regime") or "neutral"
+    return "neutral"
 
 
 @router.get("")
@@ -95,3 +109,32 @@ def actions(since: str | None = None, position_id: str | None = None,
 def exposure_view(book: str | None = None) -> dict:
     """Current exposure/cash/by-sector for ``book`` (risk-monitor's GATE 2 input, A4/B4)."""
     return book_mod.book_exposure(book or settings.book_mode)
+
+
+@router.post("/sizing")
+def sizing(payload: dict) -> dict:
+    """Size today's candidates against the book (A4): risk-budget × conviction × regime scale, capped.
+    Body: ``{candidates:[{symbol, conviction, atr_stop_pct?|stop_loss?, price, sector?}], regime_state?,
+    book_value?, book?}``. ``book_value`` defaults to the book's exposure total (else starting cash);
+    ``regime_state`` to the latest run's regime. Returns ``{book, book_value, regime_state, sizing:[…]}``.
+    Sizing never levers and has no knob to chase the 10% target (decision 4)."""
+    cands = payload.get("candidates") or []
+    if not cands:
+        raise HTTPException(status_code=422, detail="candidates required")
+    book = payload.get("book") or settings.book_mode
+    book_value = payload.get("book_value")
+    if book_value is None:
+        book_value = book_mod.book_exposure(book).get("total") or settings.book_starting_cash
+    regime_state = payload.get("regime_state") or _today_regime()
+    norm = [{
+        "symbol": c.get("symbol"), "sector": c.get("sector"), "conviction": c.get("conviction"),
+        "price": c.get("price"),
+        "atr_stop_pct": sizing_mod.stop_pct(c.get("atr_stop_pct"), c.get("stop_loss"),
+                                            c.get("price"), settings.sl_pct_floor),
+    } for c in cands]
+    results = sizing_mod.size_book(
+        norm, book_value=book_value, regime_state=regime_state,
+        risk_budget_pct=settings.risk_budget_pct_per_trade,
+        max_position_pct=settings.book_max_position_pct,
+        max_total_exposure_pct=settings.max_total_exposure_pct, lot_size=settings.lot_size)
+    return {"book": book, "book_value": book_value, "regime_state": regime_state, "sizing": results}

@@ -110,6 +110,12 @@ it NEVER places an order** (invariant 11, you are the air-gap; no broker integra
 - `GET /api/book/actions?since=&position_id=` — the append-only lifecycle log (paginated; calibration
   + the weekly review read it).
 - `GET /api/book/exposure?book=` — current gross/net/cash/by-sector exposure (risk-monitor's GATE 2 input).
+- `POST /api/book/sizing` — suggest sizes for a set of candidates (A4, §倉位管理): body
+  `{candidates:[{symbol, conviction, atr_stop_pct?|stop_loss?, price, sector?}], regime_state?,
+  book_value?, book?}`. Risk-budget × conviction × regime scale, capped per-name and in aggregate;
+  returns each `{suggested_pct, suggested_qty (lot-rounded), regime_scale, capped_by}`. `book_value`
+  defaults to the book's exposure total, `regime_state` to the latest run's regime. **No leverage and no
+  knob to chase the 10% target** (decision 4) — sizing never relaxes risk.
 
 ## Event sources (P1 stubs)
 - `GET /api/news?symbol=` · `GET /api/sentiment?symbol=` — return empty + a note in P0.
