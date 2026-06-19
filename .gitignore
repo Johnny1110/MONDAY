@@ -236,3 +236,5 @@ agents/**/memory/*
 .DS_Store
 # JetBrains IDE (machine-specific)
 .idea/
+
+alarms.json
