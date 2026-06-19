@@ -1,7 +1,7 @@
 # Swarm tools (task_create/assign/update_status/verify, task_list, proposal_list/accept/decline,
 # send_message, list_members, schedule_set/clear, alarm_set/clear, skill_publish, skill) are
 # injected by the LEADER role — do NOT list them. tool_search auto-added when deferr.yml is non-empty.
-- http_request  # operate the engine: GET /api/memory/morgan, /api/signals/today, /api/recommendations*, /api/calibration, /api/portfolio; POST /api/recommendations, /api/reports; PUT /api/memory/morgan
+- http_request  # operate the engine (2.0 round): GET /api/memory/morgan, /api/macro, /api/signals/today, /api/book*, /api/reports/daily/scaffold, /api/calibration*; POST /api/signals/rescope, /api/book/sizing, /api/book/review, /api/book/fill, /api/book/targets, /api/reports/daily, /api/recommendations/finalize; PUT /api/memory/morgan
 - todo_write    # plan the multi-step finalize / review (integrate → curate → push → reconcile)
 - calc          # portfolio / position arithmetic — decisions are never mental math
 - bash          # ad-hoc execution / quick checks; durable code & new APIs go to evva as a PRD
