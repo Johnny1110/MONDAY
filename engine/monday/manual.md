@@ -41,6 +41,19 @@ Base URL: `http://127.0.0.1:7790`
 - `GET /api/models` · `GET /api/models/{version}` — the model registry (§5.4).
 - `POST /api/models/train?source=finmind&days=400` — train + register a cold-start GBDT; reports OOS rank IC.
 
+## Macro plane (top-down read, §4.3)
+The 2.0 day starts top-down: read world indices / overnight moves to set risk-on/off. Free key-less
+source (Yahoo), **PIT-snapshotted** like prices (stamped `as_of`, append-only — never backfilled).
+macro-analyst reads this and adds world-news colour via `web_search`.
+- `GET /api/macro?as_of=` — latest (or `as_of`) snapshot: `{as_of, indices:[{symbol, name, asset_class,
+  close, prev_close, chg_pct, date}], overnight:{leaders, laggards, risk_proxies}}`. `asset_class` ∈
+  {`equity_index`,`vol`,`fx`,`rate`,`commodity`}; `chg_pct` is last close vs prior close (not intraday).
+  Small fixed list → returned whole (no pagination).
+- `GET /api/macro/{date}` — the IMMUTABLE PIT macro snapshot archived for that day (or a clear empty note).
+- `POST /api/macro/refresh?as_of=` — pull the indices + write today's snapshot now (synchronous, fast,
+  cached). data-engineer calls this each morning (STEP 0b). Returns `{as_of, n, rows_on_disk, symbols}`.
+  A dead/blocked ticker is omitted (logged), the rest succeed; a rate-limit degrades, never crashes.
+
 ## Decision plane
 - `GET /api/signals/today` — the model's LATEST candidate ranking (you overlay/veto WITHIN this set;
   never invent a name outside it — cardinal discipline 1, §5.6). Carries `signals_version` +

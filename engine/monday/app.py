@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__, config, store
 from .config import settings
-from .routers import (admin, calibration, chips, factors, features, journal, ledger, memory,
+from .routers import (admin, calibration, chips, factors, features, journal, ledger, macro, memory,
                       models, news, portfolio, prices, recommendations, reports, sentiment,
                       signals, system, universe)
 
@@ -55,7 +55,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Monday engine", version=__version__, lifespan=lifespan)
 
 for _r in (universe, prices, factors, features, models, signals, recommendations, portfolio,
-           ledger, calibration, chips, news, sentiment, memory, journal, reports, system, admin):
+           ledger, calibration, chips, macro, news, sentiment, memory, journal, reports, system,
+           admin):
     app.include_router(_r.router)
 
 # Serve the built dashboard's assets (Vite emits to web/dist with base=/ui/).

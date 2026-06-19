@@ -69,6 +69,26 @@ class Settings(BaseSettings):
     book_starting_cash: float = 1_000_000.0   # NT$ notional, basis for sizing/exposure math (A4)
     book_max_position_pct: float = 20.0       # hard per-name cap as % of book (A4 sizing + risk gate read it)
 
+    # --- 2.0 macro plane (A2; world indices for the top-down read) ----------------
+    # Free, key-less Yahoo chart source (decision 6); PIT-snapshotted like prices. asset_class ∈
+    # {equity_index, vol, fx, rate, commodity}. Override the whole map via MACRO_SYMBOLS (JSON) in .env.
+    macro_source: str = "yahoo"
+    macro_symbols: dict = {
+        "^SOX":      {"name": "費城半導體",     "asset_class": "equity_index"},
+        "^IXIC":     {"name": "那斯達克",       "asset_class": "equity_index"},
+        "^GSPC":     {"name": "標普500",        "asset_class": "equity_index"},
+        "^DJI":      {"name": "道瓊工業",       "asset_class": "equity_index"},
+        "000001.SS": {"name": "上證指數",       "asset_class": "equity_index"},
+        "^HSI":      {"name": "恒生指數",       "asset_class": "equity_index"},
+        "^N225":     {"name": "日經225",        "asset_class": "equity_index"},
+        "^STOXX50E": {"name": "歐洲STOXX50",    "asset_class": "equity_index"},
+        "^VIX":      {"name": "VIX 波動率",     "asset_class": "vol"},
+        "USDTWD=X":  {"name": "美元兌台幣",     "asset_class": "fx"},
+        "^TNX":      {"name": "美10年期公債殖利率", "asset_class": "rate"},
+        "GC=F":      {"name": "黃金期貨",       "asset_class": "commodity"},
+        "CL=F":      {"name": "西德州原油期貨",  "asset_class": "commodity"},
+    }
+
 
 settings = Settings()
 

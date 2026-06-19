@@ -212,6 +212,16 @@ def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
     rows_on_disk = snapshot.write_snapshot(settings.data_dir, as_of, cleaned)
     out["stages"]["snapshot"] = {"as_of": as_of, "rows_on_disk": rows_on_disk}
 
+    # 3b — macro PIT snapshot (A2): world indices for the top-down read. Best-effort — a macro miss
+    # (Yahoo down / rate-limited) must NEVER sink the TW pipeline (invariant 8 spirit); log + continue.
+    _emit("macro", "archive PIT world indices")
+    try:
+        from . import macro as macro_mod
+        out["stages"]["macro"] = macro_mod.refresh(settings.data_dir, cache_dir, as_of=as_of)
+    except Exception as e:                        # noqa: BLE001 — never fatal
+        log.warning("macro refresh failed (non-fatal): %s", e)
+        out["stages"]["macro"] = {"error": str(e), "as_of": as_of}
+
     # 4 — feature store (+ chip factors when the source provides them, §5.6)
     _emit("features", f"build features for {len(universe)} names")
     feat_rows = fbuild.build_features(cleaned, as_of, universe)

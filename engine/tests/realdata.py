@@ -28,7 +28,10 @@ def patched():
     from monday import pipeline
     bars = load_bars()
     with mock.patch.object(pipeline, "get_source", lambda name=None: (lambda *a, **k: list(bars))), \
-         mock.patch.object(pipeline, "_enrich_chips", lambda *a, **k: None):
+         mock.patch.object(pipeline, "_enrich_chips", lambda *a, **k: None), \
+         mock.patch("monday.macro.refresh",
+                    lambda *a, **k: {"as_of": None, "n": 0, "rows_on_disk": 0, "symbols": 0,
+                                     "note": "offline (macro fetch mocked)"}):
         yield
 
 
