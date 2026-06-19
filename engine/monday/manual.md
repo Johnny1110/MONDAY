@@ -142,6 +142,13 @@ it NEVER places an order** (invariant 11, you are the air-gap; no broker integra
 - `GET /api/memory` — all boards.
 - `GET /api/journal?author=` · `POST /api/journal` `{body, title?, author?}` — team work log.
 - `GET /api/reports?kind=` · `POST /api/reports` `{title, body, kind?}` — User-facing notices.
+- **Daily report v2** (A7, §六段報告): `GET /api/reports/daily/scaffold?as_of=` returns the engine-
+  computed factual shell (宏觀 overnight / 持倉檢視 + MTM / 今日新標的 + sizing+TP/SL / 曝險) with prose
+  fields blank — morgan fills the prose. `POST /api/reports/daily` validates the composed 6-section
+  report (422 if a section or the disclaimer is missing), persists it, renders `summary_text`, and pushes
+  Telegram. `GET /api/reports/daily?as_of=` returns the stored report. **Every report carries the
+  disclaimer "研究意見，下單與盈虧 User 自負" (invariant 11).** On a blocked/no-ideas day the report still
+  ships 持倉檢視 + 宏觀 with an empty 新標的 ("今日不發新標的").
 
 ## Conventions
 - All writes are JSON bodies. Dates are ISO `YYYY-MM-DD`; `as_of` defaults to the latest
