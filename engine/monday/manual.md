@@ -79,6 +79,23 @@ macro-analyst reads this and adds world-news colour via `web_search`.
 - `GET /api/calibration/runs` · `POST /api/calibration/run?window=weekly` — snapshot a scorecard
   (the weekly review's input, §6.2).
 
+## Book / positions (2.0 managed book, §倉位管理)
+The real/paper book the User trades — one lot per (book, symbol) with weighted cost basis + a daily
+hold/add/trim/exit lifecycle. **The swarm proposes fills; the User confirms; the engine records them —
+it NEVER places an order** (invariant 11, you are the air-gap; no broker integration). `book` ∈
+{`paper`,`real`} and defaults to the engine's `book_mode` (`paper` until D1's cutover).
+- `GET /api/book?book=&status=open|all` — holdings (paginated) + an exposure `summary`
+  {n, gross, net, cash, total, by_sector, weights}.
+- `POST /api/book/fill` — record one fill (decision-agnostic): body `{symbol, side, qty, price, book?,
+  at?, source?, rec_id?, name?, reason?, regime?, take_profit?, stop_loss?, fill_key?}`. `side ∈
+  {buy, sell}`; `buy` opens/adds (avg re-weighted), `sell` trims/exits (avg held, realized booked); a
+  sell clamps to the held qty (never negative). Pass `fill_key` to make a User double-confirm
+  **idempotent**. `at` defaults to the last pipeline day. Returns the updated lot + the logged action.
+- `POST /api/book/targets` — set a lot's TP/SL: body `{symbol, book?, take_profit?, stop_loss?}` (A5).
+- `GET /api/book/actions?since=&position_id=` — the append-only lifecycle log (paginated; calibration
+  + the weekly review read it).
+- `GET /api/book/exposure?book=` — current gross/net/cash/by-sector exposure (risk-monitor's GATE 2 input).
+
 ## Event sources (P1 stubs)
 - `GET /api/news?symbol=` · `GET /api/sentiment?symbol=` — return empty + a note in P0.
 
