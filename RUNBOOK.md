@@ -68,12 +68,21 @@ evva swarm run monday                # restart the existing space ...
 evva swarm ls                        # confirm: monday → running, N members
 ```
 
-After launch the loop is **agent-driven**: morgan's only cron is the nightly anchor at **21:15
-Mon–Fri** (after chips/margin settle); it leads the pipeline and finalizes the ≤20-name book. To
-produce a day by hand instead of waiting:
+After launch the loop is **human-triggered (2.0)**: the User wakes morgan once each morning and gets a
+6-section report. morgan's primary trigger is the `round_requested` webhook; a **safety-net cron (08:45
+Mon–Fri)** backstops a missed wake. Pre-stage crons warm the cache (podcast-listener 17:00, data-engineer
+21:15 evening TW prepare). Trigger today's round by clicking **"▶ Run today's round"** in the dashboard, or:
 
 ```bash
-# prepare signals only (morgan still finalizes the book — respects the constitution):
+curl -X POST 'localhost:7790/api/system/run-round'      # wakes morgan; idempotent (409 if already today)
+```
+
+morgan then orchestrates the whole DAG: data-engineer prepare + `macro/refresh` → macro/micro-analyst →
+定調 + `signals/rescope` → quant → analyst overlay (candidates + holdings) → sizing + holdings review →
+risk gate → **propose fills to the User** → 6-section report. **The swarm never places orders** — morgan
+proposes, the User confirms (invariant 11). To prepare signals by hand without a full round:
+
+```bash
 curl -X POST 'localhost:7790/api/system/run-pipeline?source=finmind&model=gbdt&finalize=false'
 ```
 
@@ -153,6 +162,8 @@ cd engine
 ../scripts/smoke.sh                                 # full chain on a throwaway DB, leaves no artifacts
 # one real end-to-end day, stage-by-stage summary:
 .venv/bin/python -m monday.pipeline --source finmind --model gbdt --days 200
+# 2.0: dry-run the engine half of one manual round against a running engine (PAPER book, safe/idempotent):
+BASE=http://127.0.0.1:7790 ../scripts/dryrun-round.sh
 ```
 
 ---
@@ -171,12 +182,65 @@ cd engine
 
 ---
 
-## 9. Quick reference
+## 9. The 2.0 manual round, the real book & the cutover gate (D1)
+
+**The round** (human-triggered): `POST /api/system/run-round` (or the dashboard button) wakes morgan, who
+runs the DAG and posts a 6-section report (`GET /api/reports/daily`). It is idempotent — one wake per
+trading day (409 on a repeat; `?force=true` overrides). If the swarm is down at trigger time, morgan's
+safety-net cron (08:45) backstops it.
+
+**The book** (`/api/book`, the User's managed positions — separate from the 1.0 `paper_positions` sim):
+
+```bash
+curl -s localhost:7790/api/book                         # holdings + exposure (gross/net/cash/NAV/by-sector)
+curl -s localhost:7790/api/book/actions                 # hold/add/trim/exit log
+curl -s localhost:7790/api/macro                        # world-index read (top-down 定調 input)
+curl -s localhost:7790/api/calibration/macro            # macro-call accuracy (settled vs ^TWII)
+curl -s localhost:7790/api/calibration/positions        # position-management value-add
+# a fill is ALWAYS the User's decision — morgan proposes, you confirm; the engine only records it:
+curl -X POST localhost:7790/api/book/fill -H 'content-type: application/json' \
+  -d '{"book":"paper","symbol":"2330","side":"buy","qty":1000,"price":1000,"fill_key":"<unique>"}'
+```
+
+**`book_mode`** (config) stays `paper` during the dry-run; the dashboard/report watermark and the
+`/api/book` `book` field show which book is live. **The swarm never connects to a broker — it never places
+an order** (invariant 11); `/api/book/fill` is bookkeeping that the User confirms.
+
+### Cutover gate — paper → real (decision 3, ADR 0006)
+
+Run `scripts/dryrun-round.sh` (engine side) + the live swarm for **≥ N consecutive trading days** (set N,
+e.g. 5–10) and confirm the **12-point checklist** holds each day:
+
+1. `run-round` wakes morgan once (idempotent); dashboard button works.
+2. **GATE 1**: a degraded-data day ships a **holdings-only** report with the honest "今日不發新標的" note.
+3. macro/micro briefs reach morgan; a `macro_call` is recorded (`GET /api/calibration/macro`).
+4. `signals/rescope` → focus-sector candidates **+ all holdings scored** (full-pool ranking preserved).
+5. a-tech/a-chips/a-catalyst cover candidates **and holdings**, emitting the A5 review flags.
+6. `book/review` returns hold/add/trim/exit per lot; `book/sizing` returns sane sizes; **holdings review runs on a no-new-ideas day**.
+7. **GATE 2**: risk-monitor blocks an over-concentrated/over-sized book; morgan revises and re-checks.
+8. fills are **proposed for User confirmation** (no auto-order, invariant 11); paper book + ledger update.
+9. a 6-section report posts, carries the **disclaimer**, renders on dashboard + Telegram.
+10. daily reconcile runs; macro calls settle; the Friday scorecard shows macro-call + position-mgmt dims.
+11. **safety-net**: with the swarm down at trigger time, the backstop still produces something; no double-run.
+12. quality bar: `./scripts/run-tests.sh` green, `vue-tsc` clean, `/health` ok, no invariant regressions.
+
+**Flip to real only when** the checklist passes ≥ N consecutive days, report quality is User-approved,
+position-management looks sound in hindsight on paper, calibration is accumulating, and the per-round
+budget is acceptable. Set `BOOK_MODE=real` in `engine/.env`, restart the engine, record a **cutover ADR**.
+**Until then, no real money** (invariant 11). The 1.0 `paper_positions`/`finalize` path stays intact in
+parallel and is retired only after the real book is trusted.
+
+---
+
+## 10. Quick reference
 
 | What | Where |
 |---|---|
 | Engine entrypoint | `engine/.venv/bin/python -m monday` (uvicorn, host/port from `config.py`) |
 | Full pipeline (CLI) | `python -m monday.pipeline [--source finmind|twse] [--model gbdt] [--days N]` |
+| Trigger a 2.0 round | `POST /api/system/run-round` (or the dashboard "▶ Run today's round" button) |
+| Dry-run a round (engine) | `BASE=… scripts/dryrun-round.sh` (paper book, safe/idempotent) |
+| Cutover gate | RUNBOOK §9 (≥N clean days → `BOOK_MODE=real` + cutover ADR; invariant 11) |
 | Train GBDT | `python -m monday.models.train --source finmind --days 400` |
 | API manual | `GET /manual` · routers in `engine/monday/routers/` |
 | Deps | `engine/requirements.txt` (run/test) · `engine/pyproject.toml` (packaging) |
