@@ -1,0 +1,1 @@
+const i=(t,o=1)=>t==null?"—":`${(t*100).toFixed(o)}%`,n=(t,o=1)=>t==null?"—":`${t>=0?"+":""}${(t*100).toFixed(o)}%`,s=(t,o=2)=>t==null?"—":t.toLocaleString(void 0,{maximumFractionDigits:o,minimumFractionDigits:o}),l=t=>t==null?"—":Math.round(t).toLocaleString(),a=t=>t==null?"—":t.toFixed(3),c=t=>t==null?"":t>0?"pos":t<0?"neg":"";export{i as a,n as b,l as c,a as d,s as f,c as s};
