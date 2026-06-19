@@ -61,6 +61,13 @@ macro-analyst reads this and adds world-news colour via `web_search`.
 - `GET /api/signals/{date}` — the IMMUTABLE signals snapshot archived for that day — the exact set a
   finalized book was built against, preserved even after later runs (decision traceability). Once a day
   is finalized, a later prepare run won't overwrite `today` unless `force=true`.
+- `POST /api/signals/rescope` — the 2.0 SYNC A→quant step (§flow): after morgan sets the day's focus
+  sectors, scope the prepared ranking to them. Body `{focus_sectors:[…], holdings?:[…], pool?, force?}`.
+  The model still ranks the **full pool** (cross-sectional validity) — this only narrows the **output** to
+  focus-sector candidates **plus every current holding** (always scored, even outside focus, so hold/
+  trim/exit has the model's view). No re-inference (reads the persisted predictions). `holdings` defaults
+  to the open book; republishes `signals/today` with a new `signals_version`; refuses a finalized day
+  unless `force=true`. Names with no prediction row come back in `holdings_unscored`.
 - `GET /api/recommendations/today` — the daily envelope (appendix C contract).
 - `GET /api/recommendations?as_of=` — persisted ideas (paginated).
 - `POST /api/recommendations` — commit one finalised idea `{rec_id, symbol, as_of_date, …}`;

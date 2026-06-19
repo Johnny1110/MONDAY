@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 
 from . import calibmap
 from . import clean as clean_mod
-from . import events, exits, portfolio, regime as regime_mod, signals, snapshot, store, tasks, telegram, triggers
+from . import events, exits, parquetio, portfolio, regime as regime_mod, signals, snapshot, store, tasks, telegram, triggers
 from .config import settings
 from .featurestore import build as fbuild
 from .ingest import get_source
@@ -137,6 +137,23 @@ def _infer(model: str, feat_rows: list[dict]) -> tuple[list[dict], str]:
                          factor_set=baseline.FACTOR_SET,
                          notes="P0 transparent cross-sectional momentum ranker")
     return baseline.infer(feat_rows), baseline.MODEL_VERSION
+
+
+def predictions_path(data_dir: str, as_of: str) -> str:
+    return str(pathlib.Path(data_dir) / "predictions" / f"{as_of}.parquet")
+
+
+def write_predictions(data_dir: str, as_of: str, preds: list[dict]) -> int:
+    """Archive the FULL ranked pool for ``as_of`` (A6) so a focus rescope needs no re-inference —
+    PIT-consistent, parquet, idempotent per (as_of, symbol)."""
+    rows = [{**p, "as_of": as_of} for p in preds]
+    return parquetio.upsert(predictions_path(data_dir, as_of), rows, keys=["as_of", "symbol"])
+
+
+def read_predictions(data_dir: str, as_of: str) -> list[dict]:
+    """The archived full ranked pool for ``as_of`` (rank-sorted, best-first); [] if none persisted."""
+    rows = parquetio.read_rows(predictions_path(data_dir, as_of))
+    return sorted(rows, key=lambda r: (r.get("rank") if r.get("rank") is not None else 1e9))
 
 
 def _fit_conviction_map() -> list:
@@ -267,6 +284,16 @@ def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
         p["conviction"] = calibmap.apply(cmap, p.get("predicted_prob_tp"))
     out["stages"]["inference"] = {"model": model_version, "ranked": len(preds),
                                   "conviction_calibrated": bool(cmap)}
+
+    # A6: persist the FULL ranked pool so a focus rescope (POST /api/signals/rescope) needs no
+    # re-inference (PIT-consistent). Best-effort — a persist failure must not sink the autonomous run.
+    try:
+        write_predictions(settings.data_dir, as_of, preds)
+        store.kv_set(f"predictions_meta:{as_of}", json.dumps(
+            {"model_version": model_version, "regime": regime, "degraded": degraded},
+            ensure_ascii=False))
+    except Exception as e:                        # noqa: BLE001 — never fatal (rescope just unavailable)
+        log.warning("persist predictions failed (non-fatal, rescope unavailable): %s", e)
 
     # 6 — candidate signals (served at /api/signals/today + archived immutably at /api/signals/{date}).
     # B9/B13: once a day is finalized, a later/background prepare run must NOT clobber the signals
