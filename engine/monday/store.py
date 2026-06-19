@@ -153,6 +153,75 @@ CREATE TABLE IF NOT EXISTS kv (
     v TEXT
 );
 
+-- The 2.0 MANAGED BOOK (A1): one row per held lot, qty-aware. Distinct from paper_positions (the 1.0
+-- auto sim, qty=1), so the autonomous pipeline keeps working until D1 cuts over. "book" separates the
+-- dry-run paper book from the User's real book, "source" records who originated the lot, "rec_id" links
+-- to a model rec when one exists. The swarm never places orders (invariant 11) -- fills land here only
+-- on the User's confirmation.
+CREATE TABLE IF NOT EXISTS book_positions (
+    position_id  TEXT PRIMARY KEY,            -- "<book>:<symbol>:<opened_at>" (caller-supplied, stable)
+    book         TEXT NOT NULL DEFAULT 'paper',   -- paper | real
+    symbol       TEXT NOT NULL,
+    name         TEXT,
+    direction    TEXT NOT NULL DEFAULT 'long',
+    qty          DOUBLE PRECISION NOT NULL,       -- shares (or lots) actually held
+    avg_entry    DOUBLE PRECISION NOT NULL,
+    opened_at    TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'open',     -- open | closed
+    source       TEXT NOT NULL DEFAULT 'morgan',   -- model | morgan | user
+    rec_id       TEXT,                             -- FK-ish to recommendations.rec_id (nullable for user lots)
+    sizing_pct   DOUBLE PRECISION,                 -- the % of book this lot was sized to (A4)
+    take_profit  DOUBLE PRECISION,
+    stop_loss    DOUBLE PRECISION,
+    updated_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_book_open ON book_positions (book, status, symbol);
+
+-- Every lifecycle decision, append-only — the substrate for position-management calibration (§6, A9).
+CREATE TABLE IF NOT EXISTS position_actions (
+    action_id    BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    position_id  TEXT,
+    symbol       TEXT NOT NULL,
+    action_date  TEXT NOT NULL,
+    action       TEXT NOT NULL,                    -- open | hold | add | trim | exit
+    prev_qty     DOUBLE PRECISION,
+    delta_qty    DOUBLE PRECISION,
+    new_qty      DOUBLE PRECISION,
+    reason       TEXT,
+    decided_by   TEXT NOT NULL DEFAULT 'morgan',
+    regime       TEXT,
+    created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_posaction_recent ON position_actions (action_date, position_id);
+
+-- macro-analyst's daily top-down call, scored later for macro-call accuracy (A9, §倉位管理 校準擴充).
+CREATE TABLE IF NOT EXISTS macro_calls (
+    call_id              TEXT PRIMARY KEY,         -- "<call_date>" (one per round)
+    call_date            TEXT NOT NULL,
+    risk_state           TEXT,                     -- risk_on | neutral | risk_off
+    horizon_days         INTEGER,
+    sectors_favored      TEXT,                     -- JSON list
+    sectors_avoid        TEXT,                     -- JSON list
+    by                   TEXT DEFAULT 'macro-analyst',
+    rationale            TEXT,
+    realized_index_fwd_ret DOUBLE PRECISION,       -- filled in on settlement (A9)
+    correct              INTEGER,                  -- 1/0/NULL, scored by A9
+    created_at           TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_macro_call_date ON macro_calls (call_date);
+
+-- The structured 6-section daily report (A7). "data" is the full JSON, "summary_text" the rendered prose.
+CREATE TABLE IF NOT EXISTS daily_report (
+    id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    as_of        TEXT NOT NULL,
+    ts           TEXT NOT NULL,
+    regime       TEXT,
+    risk_state   TEXT,
+    data         TEXT NOT NULL,                    -- JSON: {sections:{...}, disclaimer}
+    summary_text TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_daily_report_asof ON daily_report (as_of DESC, id DESC);
+
 -- Single-flight pipeline mutex (B11): one row, taken via an atomic conditional UPDATE so the lock
 -- holds ACROSS processes (the HTTP server and a CLI run are separate OS processes). A stale heartbeat
 -- reclaims a crashed run. NOT in _TABLES so reset() never wipes the seed row.
@@ -167,11 +236,13 @@ INSERT INTO pipeline_lock (id, task_id) VALUES (1, NULL) ON CONFLICT (id) DO NOT
 """
 
 _TABLES = ("recommendations", "paper_positions", "ledger_marks", "outcomes",
-           "model_registry", "calibration_runs", "memory", "journal", "report", "kv")
+           "model_registry", "calibration_runs", "memory", "journal", "report", "kv",
+           "book_positions", "position_actions", "macro_calls", "daily_report")
 
 # Columns that carry JSON-encoded lists/objects (decoded on read).
 _JSON_COLS = {"contributing_factors", "contributing_analysts", "factor_set",
-              "regime_weights", "attribution", "adjustments"}
+              "regime_weights", "attribution", "adjustments",
+              "sectors_favored", "sectors_avoid", "data"}
 
 
 def _now() -> str:
@@ -587,3 +658,186 @@ def list_reports(kind: str | None = None) -> list[dict]:
         else:
             rows = cur.execute("SELECT * FROM report ORDER BY id DESC").fetchall()
         return [dict(r) for r in rows]
+
+
+# --------------------------------------------------------------------------
+# 2.0 managed book (A1) — qty-aware real/paper lots, distinct from the 1.0
+# paper_positions auto-sim. The autonomous pipeline keeps using paper_positions
+# until D1 cuts over (backward compat). The swarm never places orders
+# (invariant 11); fills land here only on the User's confirmation (A3).
+# --------------------------------------------------------------------------
+
+_BOOK_FIELDS = ("position_id", "book", "symbol", "name", "direction", "qty", "avg_entry",
+                "opened_at", "status", "source", "rec_id", "sizing_pct",
+                "take_profit", "stop_loss")
+
+
+def upsert_book_position(pos: dict) -> dict:
+    """Insert/replace one held lot (upsert on position_id). ``position_id`` is caller-supplied and
+    stable (convention ``"<book>:<symbol>:<opened_at>"``) so re-running a round updates the same lot
+    rather than duplicating it. The NOT-NULL-with-default columns (book/direction/status/source) fall
+    back to the schema defaults when omitted."""
+    p = {**pos}
+    p.setdefault("book", "paper")
+    p.setdefault("direction", "long")
+    p.setdefault("status", "open")
+    p.setdefault("source", "morgan")
+    cols = (*_BOOK_FIELDS, "updated_at")
+    vals = [p.get(f) for f in _BOOK_FIELDS]
+    updates = ", ".join(f"{c}=EXCLUDED.{c}" for c in cols if c != "position_id")
+    with _cur() as cur:
+        cur.execute(
+            f"INSERT INTO book_positions ({','.join(cols)}) "
+            f"VALUES ({','.join(['%s'] * len(cols))}) "
+            f"ON CONFLICT (position_id) DO UPDATE SET {updates}", (*vals, _now()))
+    return get_book_position(p["position_id"])
+
+
+def get_book_position(position_id: str) -> dict | None:
+    with _cur() as cur:
+        return _row(cur.execute(
+            "SELECT * FROM book_positions WHERE position_id = %s", (position_id,)).fetchone())
+
+
+def list_book_positions(book: str | None = None, status: str | None = None) -> list[dict]:
+    clauses, params = [], []
+    if book:
+        clauses.append("book = %s"); params.append(book)
+    if status:
+        clauses.append("status = %s"); params.append(status)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    with _cur() as cur:
+        rows = cur.execute(
+            f"SELECT * FROM book_positions{where} ORDER BY opened_at DESC, symbol", params).fetchall()
+        return [_row(r) for r in rows]
+
+
+def close_book_position(position_id: str) -> None:
+    with _cur() as cur:
+        cur.execute("UPDATE book_positions SET status='closed', updated_at=%s "
+                    "WHERE position_id = %s", (_now(), position_id))
+
+
+# --------------------------------------------------------------------------
+# Position-action log (A1) — append-only hold/add/trim/exit decisions (A5/A9)
+# --------------------------------------------------------------------------
+
+_POSACTION_FIELDS = ("position_id", "symbol", "action_date", "action", "prev_qty",
+                     "delta_qty", "new_qty", "reason", "decided_by", "regime")
+
+
+def add_position_action(a: dict) -> dict:
+    """Append one lifecycle decision (action_id is DB-assigned). ``decided_by`` defaults to morgan."""
+    rec = {**a, "decided_by": a.get("decided_by") or "morgan"}
+    cols = (*_POSACTION_FIELDS, "created_at")
+    vals = [rec.get(f) for f in _POSACTION_FIELDS]
+    with _cur() as cur:
+        row = cur.execute(
+            f"INSERT INTO position_actions ({','.join(cols)}) "
+            f"VALUES ({','.join(['%s'] * len(cols))}) RETURNING *", (*vals, _now())).fetchone()
+    return _row(row)
+
+
+def list_position_actions(position_id: str | None = None, since: str | None = None) -> list[dict]:
+    # since = inclusive YYYY-MM-DD lower bound on action_date (the calibration read uses a window).
+    clauses, params = [], []
+    if position_id:
+        clauses.append("position_id = %s"); params.append(position_id)
+    if since:
+        clauses.append("action_date >= %s"); params.append(since)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    with _cur() as cur:
+        rows = cur.execute(
+            f"SELECT * FROM position_actions{where} ORDER BY action_date DESC, action_id DESC",
+            params).fetchall()
+        return [_row(r) for r in rows]
+
+
+# --------------------------------------------------------------------------
+# Macro calls (A1) — macro-analyst's daily top-down call, scored by A9
+# --------------------------------------------------------------------------
+
+_MACRO_CALL_FIELDS = ("call_id", "call_date", "risk_state", "horizon_days", "sectors_favored",
+                      "sectors_avoid", "by", "rationale", "realized_index_fwd_ret", "correct")
+
+
+def add_macro_call(c: dict) -> dict:
+    """Insert one macro call (upsert on call_id — one per round). ``by`` defaults to macro-analyst;
+    sectors_favored/avoid are JSON-encoded."""
+    rec = {**c, "by": c.get("by") or "macro-analyst"}
+    cols = (*_MACRO_CALL_FIELDS, "created_at")
+    vals = [_enc(rec.get(f)) if f in _JSON_COLS else rec.get(f) for f in _MACRO_CALL_FIELDS]
+    updates = ", ".join(f"{col}=EXCLUDED.{col}" for col in cols if col != "call_id")
+    with _cur() as cur:
+        cur.execute(
+            f"INSERT INTO macro_calls ({','.join(cols)}) "
+            f"VALUES ({','.join(['%s'] * len(cols))}) "
+            f"ON CONFLICT (call_id) DO UPDATE SET {updates}", (*vals, _now()))
+    return get_macro_call(rec["call_id"])
+
+
+def get_macro_call(call_id: str) -> dict | None:
+    with _cur() as cur:
+        return _row(cur.execute(
+            "SELECT * FROM macro_calls WHERE call_id = %s", (call_id,)).fetchone())
+
+
+def list_macro_calls(since: str | None = None) -> list[dict]:
+    with _cur() as cur:
+        if since:
+            rows = cur.execute("SELECT * FROM macro_calls WHERE call_date >= %s "
+                               "ORDER BY call_date DESC, call_id DESC", (since,)).fetchall()
+        else:
+            rows = cur.execute("SELECT * FROM macro_calls "
+                               "ORDER BY call_date DESC, call_id DESC").fetchall()
+        return [_row(r) for r in rows]
+
+
+def update_macro_call(call_id: str, **fields) -> dict | None:
+    """Patch selected columns (A9 settlement: realized_index_fwd_ret / correct). Only known columns are
+    applied (the whitelist is the fixed field tuple, so callers can't inject column names); JSON fields
+    are encoded. No-op patch returns the current row."""
+    allowed = {f for f in _MACRO_CALL_FIELDS if f != "call_id"}
+    sets, params = [], []
+    for k, v in fields.items():
+        if k not in allowed:
+            continue
+        sets.append(f"{k} = %s")
+        params.append(_enc(v) if k in _JSON_COLS else v)
+    if not sets:
+        return get_macro_call(call_id)
+    params.append(call_id)
+    with _cur() as cur:
+        cur.execute(f"UPDATE macro_calls SET {', '.join(sets)} WHERE call_id = %s", params)
+    return get_macro_call(call_id)
+
+
+# --------------------------------------------------------------------------
+# Daily report v2 (A1) — the structured 6-section User report (A7)
+# --------------------------------------------------------------------------
+
+def add_daily_report(r: dict) -> dict:
+    """Append one structured daily report (id is DB-assigned; re-posting a date keeps both, latest wins
+    on read). ``data`` is the full JSON contract ({sections, disclaimer})."""
+    with _cur() as cur:
+        row = cur.execute(
+            "INSERT INTO daily_report (as_of, ts, regime, risk_state, data, summary_text) "
+            "VALUES (%s,%s,%s,%s,%s,%s) RETURNING *",
+            (r["as_of"], r.get("ts") or _now(), r.get("regime"), r.get("risk_state"),
+             _enc(r.get("data") or {}), r.get("summary_text"))).fetchone()
+    return _row(row)
+
+
+def get_daily_report(as_of: str) -> dict | None:
+    """The latest report for a date (newest id wins if several were posted that day)."""
+    with _cur() as cur:
+        return _row(cur.execute(
+            "SELECT * FROM daily_report WHERE as_of = %s ORDER BY id DESC LIMIT 1",
+            (as_of,)).fetchone())
+
+
+def list_daily_reports() -> list[dict]:
+    with _cur() as cur:
+        rows = cur.execute(
+            "SELECT * FROM daily_report ORDER BY as_of DESC, id DESC").fetchall()
+        return [_row(r) for r in rows]

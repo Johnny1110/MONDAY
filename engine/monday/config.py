@@ -62,6 +62,13 @@ class Settings(BaseSettings):
     universe_size: int = 500            # real sources: top-N listed names by liquidity (§4.1; launch 500, widen to 800-1000)
     ingest_max_workers: int = 8         # concurrent FinMind fetches for the daily universe pull (politely bounds throughput)
 
+    # --- 2.0 managed book (A1; the real/paper book the User trades) ---------------
+    # invariant 11: the swarm NEVER places orders — fills land via the User's confirmation (A3). The
+    # book stays `paper` until D1's dry-run gate passes, then the operator flips it to `real` (decision 3).
+    book_mode: str = "paper"                  # paper | real
+    book_starting_cash: float = 1_000_000.0   # NT$ notional, basis for sizing/exposure math (A4)
+    book_max_position_pct: float = 20.0       # hard per-name cap as % of book (A4 sizing + risk gate read it)
+
 
 settings = Settings()
 
