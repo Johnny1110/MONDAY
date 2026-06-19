@@ -13,8 +13,8 @@ from __future__ import annotations
 import math
 
 MODEL_VERSION = "baseline-0"
-FACTOR_SET = ["mom_20d", "mom_60d", "mom_120d", "dist_high_60d", "rsi_14"]
-_SCORE_COLS = ["mom_20d", "mom_60d", "mom_120d"]
+FACTOR_SET = ["mom_20d", "mom_60d", "mom_120d", "dist_high_60d", "rsi_14", "pe_ratio"]
+_SCORE_COLS = ["mom_20d", "mom_60d", "mom_120d", "pe_ratio"]
 
 
 def _zstats(values: list[float | None]) -> tuple[float, float] | None:

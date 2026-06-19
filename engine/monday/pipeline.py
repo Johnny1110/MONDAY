@@ -59,7 +59,8 @@ def _build_rec(c: dict, as_of: str, model_version: str, regime: str, window: int
         "exit_basis": exit_basis,                # atr | fixed (shown in the envelope; prices are what persist)
         "holding_window_days": window,
         "contributing_factors": [k for k in ("mom_20d", "mom_60d", "mom_120d")
-                                 if c.get(k) is not None and c[k] > 0],
+                                 if c.get(k) is not None and c[k] > 0]
+                                 + (["pe_ratio"] if c.get("pe_ratio") is not None else []),
         "contributing_analysts": [],             # LLM overlay is the swarm's job (P1, §5.6)
         "rationale": f"Cross-sectional model rank ({model_version}).",
         "risk_notes": "Paper portfolio, not investment advice; cold-start model — treat as a hypothesis (§9).",
@@ -119,6 +120,20 @@ def _enrich_chips(rows: list[dict], as_of: str, cache_dir: str) -> None:
     syms = sorted({r["symbol"] for r in rows})
     start = finmind._anchor_start(as_of, 90)        # month-anchored ≥60d lookback → stable cache key
     chips.enrich_rows(rows, finmind.fetch_chips(syms, start, None, settings.finmind_token, cache_dir))
+
+
+def _enrich_pe(rows: list[dict], as_of: str, cache_dir: str) -> None:
+    """Merge pe_ratio into feature rows in place (FinMind TaiwanStockPER). Concurrent + month-anchored
+    cache; picks the latest PER value ≤ as_of per symbol (PIT-safe)."""
+    from .ingest import finmind
+    syms = sorted({r["symbol"] for r in rows})
+    start = finmind._anchor_start(as_of, 365)       # 1y lookback — PER data changes slowly
+    per_data = finmind.fetch_pers(syms, start, None, settings.finmind_token, cache_dir)
+    for r in rows:
+        series = per_data.get(r["symbol"]) or []
+        # latest PER ≤ as_of
+        valid = [x for x in series if x["date"] <= as_of and x["per"] > 0]
+        r["pe_ratio"] = valid[-1]["per"] if valid else None
 
 
 def _infer(model: str, feat_rows: list[dict]) -> tuple[list[dict], str]:
@@ -244,6 +259,7 @@ def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
     feat_rows = fbuild.build_features(cleaned, as_of, universe)
     if source == "finmind":
         _enrich_chips(feat_rows, as_of, cache_dir)
+        _enrich_pe(feat_rows, as_of, cache_dir)
     fbuild.write_features(settings.data_dir, feat_rows)
     degraded = signals.degraded_factors(feat_rows)        # B6: factors null across most of the universe
     if degraded:

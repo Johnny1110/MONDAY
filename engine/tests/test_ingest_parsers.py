@@ -125,6 +125,38 @@ class TestFinMind(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["value"], 100.0)
 
+    def test_parse_per_none(self):
+        self.assertEqual(finmind.parse_per(None), [])
+
+    def test_parse_per_bad_status(self):
+        self.assertEqual(finmind.parse_per({"status": 402, "msg": "limit"}), [])
+
+    def test_parse_per(self):
+        payload = {"status": 200, "data": [
+            {"date": "2026-06-17", "stock_id": "2330", "PER": 18.5, "PBR": 4.2,
+             "dividend_yield": 2.1},
+            {"date": "2026-06-16", "stock_id": "2330", "PER": 18.2, "PBR": 4.1,
+             "dividend_yield": 2.15},
+        ]}
+        rows = finmind.parse_per(payload)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["date"], "2026-06-16")     # sorted ascending
+        self.assertEqual(rows[1]["date"], "2026-06-17")
+        self.assertEqual(rows[1]["per"], 18.5)
+        self.assertEqual(rows[1]["stock_id"], "2330")
+        self.assertEqual(rows[0]["pbr"], 4.1)
+
+    def test_parse_per_skips_bad_rows(self):
+        payload = {"status": 200, "data": [
+            {"date": "2026-06-17", "stock_id": "2330", "PER": "n/a", "PBR": 4.2,
+             "dividend_yield": 2.1},
+            {"date": "2026-06-16", "stock_id": "2330", "PER": 18.2, "PBR": 4.1,
+             "dividend_yield": 2.15},
+        ]}
+        rows = finmind.parse_per(payload)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["per"], 18.2)
+
 
 if __name__ == "__main__":
     unittest.main()

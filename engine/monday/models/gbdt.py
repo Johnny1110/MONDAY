@@ -20,7 +20,9 @@ from itertools import groupby
 
 GBDT_FEATURES = ["mom_20d", "mom_60d", "mom_120d", "dist_high_60d", "rsi_14", "vol_20d",
                  # chip factors (籌碼, §5.6) — present when source has chip data, else NaN
-                 "foreign_streak", "invtrust_streak", "margin_chg_5d", "short_chg_5d"]
+                 "foreign_streak", "invtrust_streak", "margin_chg_5d", "short_chg_5d",
+                 # fundamentals (§4.3) — pe_ratio from FinMind TaiwanStockPER
+                 "pe_ratio"]
 
 
 def _np():

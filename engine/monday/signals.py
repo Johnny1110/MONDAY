@@ -7,7 +7,7 @@ the LLM never invents a name outside it (cardinal discipline 1). Pure: shapes da
 
 from __future__ import annotations
 
-_FACTOR_KEYS = ["mom_20d", "mom_60d", "mom_120d", "rsi_14", "dist_high_60d"]   # B6 degradation check (thin-history momentum)
+_FACTOR_KEYS = ["mom_20d", "mom_60d", "mom_120d", "rsi_14", "dist_high_60d", "pe_ratio"]   # B6 degradation check (thin-history momentum)
 # Pre-computed factors surfaced in each candidate so the analyst overlay reads them straight from the
 # envelope instead of re-fetching per symbol (kills the a-chips → FinMind per-candidate fan-out / B3b).
 # Chip factors come FREE from the pipeline's enrichment; technical from the feature store — both are

@@ -37,6 +37,7 @@ def compute_row(symbol: str, sbars: list[dict], as_of: str) -> dict:
         "vol_20d": factors.realized_vol(closes, 20),
         "atr_14": factors.atr(highs, lows, closes, 14),
         "adv_20d": adv20,
+        "pe_ratio": None,                      # enriched from FinMind TaiwanStockPER (PIT-safe)
     }
 
 
