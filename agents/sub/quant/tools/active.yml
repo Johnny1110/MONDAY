@@ -1,6 +1,6 @@
 # Swarm tools (send_message, list_members, my_tasks, task_get, task_propose,
 # alarm_set/clear) + skill are injected by the worker role — do NOT list them.
-- http_request  # GET /api/signals/today, /api/models, /api/features — the daily inference output
+- http_request  # GET /api/signals/today (rescoped focus+holdings, A6), /api/models, /api/features; POST /api/signals/rescope (morgan usually calls; quant may verify)
 - calc          # score / IC sanity arithmetic
 - repl          # quick numeric checks over the candidate ranking
 - bash          # ad-hoc execution beyond the python repl; durable code goes through morgan → evva

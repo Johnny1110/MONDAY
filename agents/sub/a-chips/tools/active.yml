@@ -1,6 +1,6 @@
 # Swarm tools (send_message, list_members, my_tasks, task_get, task_propose,
 # alarm_set/clear) + skill are injected by the worker role — do NOT list them.
-- http_request  # GET /api/signals/today (candidates), /api/prices, /api/features — chip / flow reads
+- http_request  # GET /api/signals/today (candidates), /api/book?status=open (holdings to review), /api/chips?symbol=, /api/prices, /api/features
 - calc          # chip arithmetic (net-buy streaks, margin ratios, % of float)
 - bash          # ad-hoc execution; durable code & new APIs go through morgan → evva
 - read          # docs/PRD tickets, teammates' memory dirs

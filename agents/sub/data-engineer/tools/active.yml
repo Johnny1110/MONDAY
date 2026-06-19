@@ -1,7 +1,7 @@
 # Swarm tools (send_message, list_members, my_tasks, task_get, task_propose,
 # alarm_set/clear) + skill are injected by the worker role — do NOT list them.
 # tool_search is auto-added by the framework when deferr.yml is non-empty.
-- http_request  # drive the engine data layer + read /api/universe, /api/features, /api/factors, /api/prices, /api/system
+- http_request  # drive the data layer + POST /api/macro/refresh (STEP 0b); read /api/universe, /api/features, /api/factors, /api/prices, /api/macro, /api/system
 - web_search    # hunt new free TW data sources when calibration shows the model is feature-starved (§6 data loop)
 - calc          # coverage / quality arithmetic (missing %, source-mismatch deltas)
 - bash          # ad-hoc execution; reusable ingest / scripts go through morgan → evva
