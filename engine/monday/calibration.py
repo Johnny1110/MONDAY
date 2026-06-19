@@ -103,6 +103,77 @@ def reliability_gap(curve: list[dict]) -> float | None:
     return round(sum(abs(b["observed"] - b["mean_pred"]) * b["n"] for b in curve) / tot, 4)
 
 
+def score_macro_call(risk_state: str | None, fwd_ret: float | None, eps: float) -> int | None:
+    """Did a macro call match the realized forward benchmark return? (A9, §倉位管理 校準擴充)
+    ``risk_on`` correct when fwd > +eps; ``risk_off`` when fwd < −eps; ``neutral`` when |fwd| ≤ eps.
+    Returns 1/0, or None when ``fwd_ret`` is unknown or the state is unrecognised. ``eps`` is a fraction."""
+    if fwd_ret is None:
+        return None
+    rs = (risk_state or "").lower()
+    if rs == "risk_on":
+        return 1 if fwd_ret > eps else 0
+    if rs == "risk_off":
+        return 1 if fwd_ret < -eps else 0
+    if rs == "neutral":
+        return 1 if abs(fwd_ret) <= eps else 0
+    return None
+
+
+def macro_call_accuracy(calls: list[dict]) -> dict:
+    """Macro-call accuracy over the SETTLED subset (each {risk_state, correct, realized_index_fwd_ret}).
+    Returns {n, hit_rate, by_risk_state:{state:{n,hit_rate}}, avg_fwd_when_risk_on, avg_fwd_when_risk_off}."""
+    settled = [c for c in calls if c.get("correct") is not None]
+    n = len(settled)
+    by_state = {}
+    for state in ("risk_on", "neutral", "risk_off"):
+        grp = [c for c in settled if (c.get("risk_state") or "").lower() == state]
+        if grp:
+            by_state[state] = {"n": len(grp),
+                               "hit_rate": round(sum(c["correct"] for c in grp) / len(grp), 4)}
+
+    def _avg_fwd(state):
+        xs = [c["realized_index_fwd_ret"] for c in settled
+              if (c.get("risk_state") or "").lower() == state
+              and c.get("realized_index_fwd_ret") is not None]
+        return round(sum(xs) / len(xs), 4) if xs else None
+
+    return {
+        "n": n,
+        "hit_rate": round(sum(c["correct"] for c in settled) / n, 4) if n else None,
+        "by_risk_state": by_state,
+        "avg_fwd_when_risk_on": _avg_fwd("risk_on"),
+        "avg_fwd_when_risk_off": _avg_fwd("risk_off"),
+    }
+
+
+def position_mgmt_value(actions: list[dict], realized_lookup: dict) -> dict:
+    """Did trims/exits add value vs holding? For each trim/exit action, value_add = realized_at_action −
+    counterfactual_hold_return. ``realized_lookup`` maps (symbol, action_date) → {realized, hold}.
+    Positive ⇒ the discipline helped. Returns {n, n_trim, n_exit, trim_value_add_mean,
+    exit_value_add_mean, value_add_mean, pct_actions_value_positive}. Honest: reports negatives too."""
+    trims, exits = [], []
+    for a in actions:
+        act = a.get("action")
+        if act not in ("trim", "exit"):
+            continue
+        rl = realized_lookup.get((a.get("symbol"), a.get("action_date")))
+        if not rl or rl.get("realized") is None or rl.get("hold") is None:
+            continue
+        (exits if act == "exit" else trims).append(rl["realized"] - rl["hold"])
+    allv = trims + exits
+
+    def _mean(xs):
+        return round(sum(xs) / len(xs), 4) if xs else None
+
+    return {
+        "n": len(allv), "n_trim": len(trims), "n_exit": len(exits),
+        "trim_value_add_mean": _mean(trims), "exit_value_add_mean": _mean(exits),
+        "value_add_mean": _mean(allv),
+        "pct_actions_value_positive": (round(sum(1 for v in allv if v > 0) / len(allv), 4)
+                                       if allv else None),
+    }
+
+
 def attribution(rows: list[dict], key: str) -> dict:
     """Mean realized return grouped by ``key``.
 

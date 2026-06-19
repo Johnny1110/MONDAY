@@ -82,6 +82,7 @@ class Settings(BaseSettings):
     # {equity_index, vol, fx, rate, commodity}. Override the whole map via MACRO_SYMBOLS (JSON) in .env.
     macro_source: str = "yahoo"
     macro_symbols: dict = {
+        "^TWII":     {"name": "台股加權",       "asset_class": "equity_index"},  # home index + macro-call benchmark (A9)
         "^SOX":      {"name": "費城半導體",     "asset_class": "equity_index"},
         "^IXIC":     {"name": "那斯達克",       "asset_class": "equity_index"},
         "^GSPC":     {"name": "標普500",        "asset_class": "equity_index"},
@@ -96,6 +97,13 @@ class Settings(BaseSettings):
         "GC=F":      {"name": "黃金期貨",       "asset_class": "commodity"},
         "CL=F":      {"name": "西德州原油期貨",  "asset_class": "commodity"},
     }
+
+    # macro-call + position-mgmt calibration (A9) — scored beside the stock-pick ledger
+    macro_call_eps_pct: float = 1.0          # |fwd benchmark return| band (%) for a 'neutral' call to be correct
+    macro_benchmark_symbol: str = "^TWII"    # benchmark for scoring macro calls (TAIEX), read from the macro snapshot
+    macro_drift_enabled: bool = False        # ship the macro_drift trigger dark until enough calls settle
+    macro_call_floor: float = 0.5            # macro hit-rate floor; below for N reviews → macro_drift
+    macro_drift_periods: int = 3
 
 
 settings = Settings()

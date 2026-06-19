@@ -1,8 +1,16 @@
-"""Calibration math (§6.1) — pure stdlib, runs anywhere."""
+"""Calibration math (§6.1) — pure stdlib, runs anywhere. A9 adds macro-call + position-mgmt dims."""
 
+import tempfile
 import unittest
 
 from monday import calibration as c
+from tests.pgtest import fresh_store, requires_pg
+
+try:
+    import pyarrow  # noqa: F401
+    HAVE_PYARROW = True
+except Exception:
+    HAVE_PYARROW = False
 
 
 class TestCalibration(unittest.TestCase):
@@ -68,6 +76,109 @@ class TestCalibration(unittest.TestCase):
         # count-weighted: (0.2×10 + 0×30) / 40 = 0.05
         self.assertAlmostEqual(c.reliability_gap(curve), 0.05, places=4)
         self.assertIsNone(c.reliability_gap([]))
+
+
+class TestJudgementCalibration(unittest.TestCase):
+    """A9 — macro-call accuracy + position-management value-add (pure)."""
+
+    def test_macro_correct_rule(self):
+        self.assertEqual(c.score_macro_call("risk_on", 0.05, 0.01), 1)
+        self.assertEqual(c.score_macro_call("risk_on", 0.005, 0.01), 0)   # within band → not 'up'
+        self.assertEqual(c.score_macro_call("risk_off", -0.05, 0.01), 1)
+        self.assertEqual(c.score_macro_call("risk_off", 0.02, 0.01), 0)
+        self.assertEqual(c.score_macro_call("neutral", 0.005, 0.01), 1)   # flat within band
+        self.assertEqual(c.score_macro_call("neutral", 0.05, 0.01), 0)
+        self.assertIsNone(c.score_macro_call("risk_on", None, 0.01))      # unsettled
+
+    def test_macro_call_accuracy(self):
+        calls = [{"risk_state": "risk_on", "correct": 1, "realized_index_fwd_ret": 0.04},
+                 {"risk_state": "risk_on", "correct": 0, "realized_index_fwd_ret": -0.01},
+                 {"risk_state": "risk_off", "correct": 1, "realized_index_fwd_ret": -0.03},
+                 {"risk_state": "neutral", "correct": None}]              # unsettled → excluded
+        a = c.macro_call_accuracy(calls)
+        self.assertEqual(a["n"], 3)
+        self.assertAlmostEqual(a["hit_rate"], 2 / 3, places=4)
+        self.assertEqual(a["by_risk_state"]["risk_on"]["n"], 2)
+        self.assertAlmostEqual(a["by_risk_state"]["risk_on"]["hit_rate"], 0.5)
+        self.assertAlmostEqual(a["avg_fwd_when_risk_on"], (0.04 - 0.01) / 2)
+
+    def test_position_mgmt_value(self):
+        actions = [{"action": "exit", "symbol": "A", "action_date": "d1"},   # well-timed
+                   {"action": "exit", "symbol": "B", "action_date": "d2"},   # premature
+                   {"action": "hold", "symbol": "C", "action_date": "d3"}]   # ignored
+        lookup = {("A", "d1"): {"realized": 0.05, "hold": -0.03},   # avoided a drop → +0.08
+                  ("B", "d2"): {"realized": 0.05, "hold": 0.15}}    # missed a run-up → -0.10
+        v = c.position_mgmt_value(actions, lookup)
+        self.assertEqual((v["n"], v["n_exit"]), (2, 2))
+        self.assertAlmostEqual(v["exit_value_add_mean"], (0.08 - 0.10) / 2)
+        self.assertAlmostEqual(v["pct_actions_value_positive"], 0.5)
+
+    def test_macro_drift_detect(self):
+        from monday import triggers
+        self.assertIsNone(triggers.detect_macro_drift([0.6, 0.4, 0.4], 0.5, 3))  # not all below floor
+        ev = triggers.detect_macro_drift([0.4, 0.3, 0.45], 0.5, 3)
+        self.assertEqual(ev["data"]["event_type"], "macro_drift")
+        self.assertIsNone(triggers.detect_macro_drift([0.4, None, 0.3], 0.5, 3))  # gap breaks the streak
+
+
+@requires_pg
+@unittest.skipUnless(HAVE_PYARROW, "needs pyarrow for the macro snapshot")
+class TestMacroSettlement(unittest.TestCase):
+    """A9 settlement + scorecard folding (store + macro snapshots)."""
+
+    def setUp(self):
+        from monday.config import settings
+        self.tmp = tempfile.mkdtemp()
+        settings.data_dir = self.tmp
+        fresh_store()
+
+    def tearDown(self):
+        from monday import store
+        store.close()
+
+    def _twii(self, date, close):
+        from monday import macro
+        macro.write_macro_snapshot(self.tmp, date, [{"symbol": "^TWII", "close": close,
+                                                     "asset_class": "equity_index"}])
+
+    def test_settle_macro_calls_and_idempotent(self):
+        from monday import store
+        from monday.routers import calibration as cal
+        self._twii("2026-05-01", 20000.0)
+        self._twii("2026-05-21", 21000.0)                       # +5% over the 20d horizon
+        store.add_macro_call({"call_id": "2026-05-01", "call_date": "2026-05-01",
+                              "risk_state": "risk_on", "horizon_days": 20})
+        r = cal.settle_macro_calls("2026-05-21")
+        self.assertEqual(r["settled"], 1)
+        got = store.get_macro_call("2026-05-01")
+        self.assertEqual(got["correct"], 1)                     # risk_on + +5% → correct
+        self.assertAlmostEqual(got["realized_index_fwd_ret"], 0.05, places=3)
+        self.assertEqual(cal.settle_macro_calls("2026-05-21")["settled"], 0)   # idempotent
+
+    def test_settle_skips_unmatured(self):
+        from monday import store
+        from monday.routers import calibration as cal
+        self._twii("2026-05-01", 20000.0)
+        store.add_macro_call({"call_id": "2026-05-01", "call_date": "2026-05-01",
+                              "risk_state": "risk_on", "horizon_days": 20})
+        self.assertEqual(cal.settle_macro_calls("2026-05-10")["settled"], 0)   # not matured yet
+        self.assertIsNone(store.get_macro_call("2026-05-01")["correct"])
+
+    def test_scorecard_carries_new_dims(self):
+        from monday import store
+        from monday.routers import calibration as cal
+        self._twii("2026-05-01", 20000.0)
+        self._twii("2026-05-21", 19000.0)                       # -5% → risk_off correct
+        store.add_macro_call({"call_id": "2026-05-01", "call_date": "2026-05-01",
+                              "risk_state": "risk_off", "horizon_days": 20})
+        cal.settle_macro_calls("2026-05-21")
+        run = cal.save_run(post=False)
+        self.assertIn("macro", run)                             # response carries the dims
+        self.assertIn("position_mgmt", run)
+        self.assertIn("macro", run["adjustments"])              # and they're stored in the scorecard JSON
+        self.assertEqual(run["adjustments"]["macro"]["n"], 1)
+        for k in ("hit_rate", "ic", "avg_win", "avg_loss"):     # stock-pick fields intact
+            self.assertIn(k, run)
 
 
 if __name__ == "__main__":

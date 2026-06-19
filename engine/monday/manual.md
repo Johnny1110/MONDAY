@@ -92,7 +92,17 @@ macro-analyst reads this and adds world-news colour via `web_search`.
 - `POST /api/ledger/reconcile?source=finmind` — daily mark-to-market of open positions (reviewer-calibrator).
 - `GET /api/calibration` — live scorecard (IC / hit-rate / calibration curve / attribution).
 - `GET /api/calibration/runs` · `POST /api/calibration/run?window=weekly` — snapshot a scorecard
-  (the weekly review's input, §6.2).
+  (the weekly review's input, §6.2). The snapshot now also folds in the **macro-call** + **position-mgmt**
+  dims (A9, inside the scorecard JSON — no schema change).
+- `POST /api/calibration/macro/call` — record today's macro call (A9): `{risk_state ∈
+  risk_on|neutral|risk_off, call_date?, horizon_days?, sectors_favored?, sectors_avoid?, by?,
+  rationale?}`. macro-analyst writes its own (`by`-attributed) so its accuracy is measurable.
+- `GET /api/calibration/macro` — macro-call accuracy over settled calls (overall + by risk_state) + the
+  call log. `POST /api/calibration/macro/settle?as_of=` scores matured calls vs the benchmark's forward
+  return (PIT snapshots; idempotent).
+- `GET /api/calibration/positions` — position-management value-add: did trims/exits beat holding?
+  (mean value-add + share of value-positive actions, from the action log + PIT prices). Honest — reports
+  negatives too.
 
 ## Book / positions (2.0 managed book, §倉位管理)
 The real/paper book the User trades — one lot per (book, symbol) with weighted cost basis + a daily

@@ -77,6 +77,15 @@ def detect_factor_decay(factor_means: dict[str, list[float | None]], periods: in
     return out
 
 
+def detect_macro_drift(hit_history: list[float | None], floor: float, periods: int) -> dict | None:
+    """Fire when the last ``periods`` macro-call hit-rates are all present and < ``floor`` (the top-down
+    framework has stopped adding value — recalibrate 定調). Mirrors ``detect_calibration_drift`` (A9)."""
+    recent = hit_history[-periods:]
+    if len(recent) < periods or any(h is None for h in recent):
+        return None
+    return events.macro_drift_event(round(recent[-1], 3), periods) if all(h < floor for h in recent) else None
+
+
 def evaluate_calibration(runs: list[dict], *, ic_floor: float, drift_weeks: int,
                          decay_periods: int) -> list[dict]:
     """The calibration trigger payloads the run history warrants (built, not yet posted)."""

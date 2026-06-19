@@ -86,6 +86,17 @@ def pipeline_complete_event(as_of: str, candidate_count: int, signals_version: s
         to=to)
 
 
+def macro_drift_event(hit_rate: float, periods: int, to: str = "morgan") -> dict:
+    """`macro_drift` (A9): the macro-call hit-rate has been below floor for N reviews — the top-down
+    framework may be systematically biased. Wakes morgan/macro-analyst to recalibrate the 定調 process."""
+    return build_event(
+        f"macro drift: hit-rate {hit_rate:.0%} for {periods} reviews",
+        f"宏觀判斷命中率連 {periods} 次低於門檻（現值 {hit_rate:.0%}）。",
+        data={"event_type": "macro_drift", "hit_rate": round(hit_rate, 3), "periods": periods,
+              "suggested_action": "復盤宏觀框架：是否系統性偏多/偏空？校正定調流程（GET /api/calibration/macro）。"},
+        to=to)
+
+
 def round_requested_event(as_of: str, requested_by: str = "user", to: str = "morgan") -> dict:
     """`round_requested`: the User manually woke Monday for today's round (A8, §workflow 啟動時機). Wakes
     the leader to run the manual-round SOP (B3) — it does NOT run the pipeline itself (morgan
