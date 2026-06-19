@@ -16,8 +16,8 @@ PASS=0; FAIL=0
 
 say() { printf '\n\033[1m== %s ==\033[0m\n' "$1"; }
 # j <json> <dotted.path> — extract a field (returns empty on miss)
-j() { "$PY" -c "import sys,json;d=json.load(sys.stdin)
-p='$2'.split('.') if '$2' else []
+j() { local p="${2:-${1:-}}"; "$PY" -c "import sys,json;d=json.load(sys.stdin)
+p='$p'.split('.') if '$p' else []
 for k in p:
  d=d.get(k) if isinstance(d,dict) else None
 print('' if d is None else d)" 2>/dev/null; }
@@ -40,7 +40,10 @@ if [ -n "$task" ]; then
   for _ in $(seq 1 120); do st=$(get "/api/system/tasks/$task" | j '' status); [ "$st" = "succeeded" -o "$st" = "failed" ] && break; sleep 2; done
   [ "$st" = "succeeded" ] && ok "pipeline prepare succeeded (task $task)" || bad "pipeline $st (task $task)"
 else bad "run-pipeline did not return a task_id (single-flight? check /api/system/status)"; fi
-mr=$(post '/api/macro/refresh'); [ -n "$(echo "$mr" | j '' as_of)" ] && ok "macro snapshot as_of=$(echo "$mr" | j '' as_of) n=$(echo "$mr" | j '' n)" || bad "macro/refresh produced no snapshot (Yahoo blocked? degrade-ok)"
+mr=$(post '/api/macro/refresh'); masof=$(echo "$mr" | j '' as_of); mn=$(echo "$mr" | j '' n)
+if [ -n "$masof" ]; then ok "macro snapshot as_of=$masof n=$mn"
+elif [ -n "$mn" ]; then echo "  · macro degraded: engine 200 but no snapshot (upstream rate-limit/blocked, n=$mn) — GATE-1 would flag a degraded-data day (degrade-ok)"
+else bad "macro/refresh endpoint unreachable / malformed response"; fi
 
 say "3. SYNC A — rescope to focus sectors (sample 半導體; morgan sets these live)"
 asof=$(get /api/system/status | j '' last_as_of)
@@ -61,7 +64,7 @@ say "7. GATE 2 — risk (engine read)"
 say "8. FINALIZE — paper fill + 6-section report (PAPER ONLY; swarm proposes, User confirms)"
 fk="dryrun-$asof-2330"
 ff=$(post '/api/book/fill' "{\"book\":\"paper\",\"symbol\":\"2330\",\"side\":\"buy\",\"qty\":1000,\"price\":1000,\"at\":\"$asof\",\"fill_key\":\"$fk\",\"reason\":\"dryrun\"}")
-[ "$(echo "$ff" | j position.symbol)" = "2330" ] && ok "paper fill recorded (idempotent via fill_key)" || bad "paper fill failed"
+[ "$(echo "$ff" | j '' position.symbol)" = "2330" ] && ok "paper fill recorded (idempotent via fill_key)" || bad "paper fill failed: $(echo "$ff" | head -c 140)"
 scaf=$(get '/api/reports/daily/scaffold')
 sec_ok=$("$PY" -c "import json;d=json.loads('''$scaf''');print('ok' if set(d.get('sections',{}))>={'macro','market_narrative','holdings_review','new_ideas','exposure','risk_notes'} else 'no')" 2>/dev/null)
 [ "$sec_ok" = "ok" ] && ok "report scaffold has all 6 sections" || bad "scaffold missing sections"
