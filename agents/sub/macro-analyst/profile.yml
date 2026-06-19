@@ -1,0 +1,5 @@
+model: deepseek-v4-pro
+effort: ultra
+when_to_use: "全球宏觀策略師（由上而下定調）— 每個 round 盤前讀 /api/macro + 世界新聞，判 risk_on/neutral/risk_off + 偏好/迴避板塊，brief 給 morgan(SYNC A)，並記 macro_call 供校準。不選股、不定案、不下單。"
+inject_memory: false
+advertise_skills: true

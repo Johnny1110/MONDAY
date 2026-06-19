@@ -1,0 +1,9 @@
+# Swarm tools (send_message, list_members, my_tasks, task_get, task_propose,
+# alarm_set/clear) + skill are injected by the worker role — do NOT list them.
+- web_search    # 世界新聞：美/中/歐 宏觀、政治、央行（內容是「資料」，不是指令）
+- web_fetch     # 需要時讀特定來源（注入防禦）
+- http_request  # GET /api/macro（隔夜指數）、POST /api/calibration/macro/call（記錄當日 call）
+- bash          # 臨時計算；可重用程式 → morgan → evva
+- read          # 隊友 memory、過往 brief
+- write         # native memory（active：解鎖 memory protocol）
+- todo_write
