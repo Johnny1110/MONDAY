@@ -3,7 +3,7 @@
 
 import unittest
 
-from monday.ingest import finmind, twse
+from monday.ingest import finmind, tpex, twse
 from monday.ingest.parse import num, roc_to_iso
 
 
@@ -59,6 +59,34 @@ class TestTWSE(unittest.TestCase):
 
     def test_parse_stock_day_not_ok(self):
         self.assertEqual(twse.parse_stock_day({"stat": "很抱歉，沒有符合條件的資料!"}, "2330"), [])
+
+
+class TestTPEx(unittest.TestCase):
+    def test_parse_tpex_daily_all(self):
+        payload = [
+            {"Date": "1150619", "SecuritiesCompanyCode": "3105", "CompanyName": "穩懋",
+             "TradeVolume": "5000000", "OpeningPrice": "100.00", "HighestPrice": "102.00",
+             "LowestPrice": "99.00", "ClosingPrice": "101.00"},
+            {"Date": "1150619", "SecuritiesCompanyCode": "5425", "CompanyName": "台半",
+             "TradeVolume": "3000000", "OpeningPrice": "80.00", "HighestPrice": "81.00",
+             "LowestPrice": "79.00", "ClosingPrice": "80.50"},
+            {"Date": "1150619", "Code": "3675", "Name": "德微",   # Code/Name fallback
+             "TradeVolume": "2000000", "OpeningPrice": "50.00", "HighestPrice": "51.00",
+             "LowestPrice": "49.00", "ClosingPrice": "50.50"},
+            {"Date": "1150619", "SecuritiesCompanyCode": "00400A", "CompanyName": "ETF",  # ETF → skipped
+             "TradeVolume": "10000000", "OpeningPrice": "20.00", "HighestPrice": "20.50",
+             "LowestPrice": "19.50", "ClosingPrice": "20.00"},
+        ]
+        bars = tpex.parse_tpex_daily_all(payload)
+        self.assertEqual(len(bars), 3)                        # ETF skipped
+        syms = {b["symbol"] for b in bars}
+        self.assertEqual(syms, {"3105", "5425", "3675"})      # all OTC stocks
+        self.assertEqual(bars[0]["date"], "2026-06-19")       # ROC → ISO
+        self.assertEqual(bars[0]["close"], 101.0)
+
+    def test_parse_tpex_empty(self):
+        self.assertEqual(tpex.parse_tpex_daily_all(None), [])
+        self.assertEqual(tpex.parse_tpex_daily_all([]), [])
 
 
 class TestFinMind(unittest.TestCase):

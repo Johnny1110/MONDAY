@@ -17,6 +17,8 @@ def rank_universe(bars: list[dict], top_n: int) -> list[tuple[str, str]]:
 
 
 def build_universe(top_n: int, cache_dir: str | None = None) -> list[tuple[str, str]]:
-    """Top-N listed names by liquidity from TWSE STOCK_DAY_ALL (one keyless call, cached)."""
-    from . import twse
-    return rank_universe(twse.fetch_daily_all(cache_dir=cache_dir), top_n)
+    """Top-N listed names by liquidity from TWSE + TPEx (one keyless cross-section call each,
+    cached). Merges both boards so OTC stocks aren't systemically excluded."""
+    from . import twse, tpex
+    all_bars = twse.fetch_daily_all(cache_dir=cache_dir) + tpex.fetch_daily_all(cache_dir=cache_dir)
+    return rank_universe(all_bars, top_n)
