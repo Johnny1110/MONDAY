@@ -81,6 +81,8 @@ class Settings(BaseSettings):
     # Free, key-less Yahoo chart source (decision 6); PIT-snapshotted like prices. asset_class ∈
     # {equity_index, vol, fx, rate, commodity}. Override the whole map via MACRO_SYMBOLS (JSON) in .env.
     macro_source: str = "yahoo"
+    macro_fallback_source: str = "twse"      # fill the benchmark (^TWII) from TWSE when Yahoo misses it
+                                             # (key-less, different source family); "" disables — ADR 0007
     macro_symbols: dict = {
         "^TWII":     {"name": "台股加權",       "asset_class": "equity_index"},  # home index + macro-call benchmark (A9)
         "^SOX":      {"name": "費城半導體",     "asset_class": "equity_index"},

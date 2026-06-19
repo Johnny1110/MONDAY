@@ -5,6 +5,13 @@ Free, **key-less** source: the Yahoo Finance v8 chart JSON (one GET per symbol),
 hygiene (invariant 6, stdlib urllib only). A single dead/blocked ticker is tolerated — it is
 logged and omitted so one bad symbol never sinks the batch (the brief degrades, it doesn't crash).
 The parser is pure (tested against a recorded fixture, no live network in tests).
+
+**Benchmark fallback (ADR 0007)**: Yahoo rate-limits aggressively, and the home index / macro-call
+benchmark (^TWII / TAIEX) is the one symbol the round cannot run without (GATE-1 data quality, A9
+scoring). When Yahoo misses it, ``fetch_taiex`` serves it from TWSE — also key-less, a *different*
+source family — so a Yahoo blackout degrades the global brief but never starves the round of the
+benchmark. Only the benchmark has a TWSE equivalent; the global proxies stay Yahoo-best-effort plus
+the macro-analyst's ``web_search`` overlay (PRD-002 decision 6).
 """
 
 from __future__ import annotations
@@ -90,3 +97,73 @@ def fetch_indices(symbols: list[str], *, cache_dir: str | None = None, days: int
         else:
             log.warning("macro: %s returned no usable bars — omitted", sym)
     return out
+
+
+# --- TWSE benchmark fallback (^TWII / TAIEX) ------------------------------------------
+# TWSE publishes the TAIEX daily OHLC key-lessly as JSON (民國/ROC dates, thousands-separated closes).
+# Used only when Yahoo can't serve the benchmark — see the module docstring (ADR 0007).
+
+TAIEX_HIST_URL = "https://www.twse.com.tw/indicesReport/MI_5MINS_HIST"
+
+
+def _roc_to_iso(roc: str) -> str | None:
+    """TWSE ROC date ``'YYY/MM/DD'`` (民國年) → ISO ``'YYYY-MM-DD'`` (ROC year + 1911). ``None`` on
+    malformed input."""
+    try:
+        y, m, d = roc.strip().split("/")
+        return f"{int(y) + 1911:04d}-{int(m):02d}-{int(d):02d}"
+    except (ValueError, AttributeError):
+        return None
+
+
+def parse_taiex_hist(payload: dict | None) -> list[dict]:
+    """TWSE ``MI_5MINS_HIST`` JSON → ``[{date, close}, …]`` ascending (latest last). Pure + tolerant:
+    ``[]`` on any missing/malformed shape, skips rows with an unparseable date/close. The close column
+    (收盤指數) carries thousands separators (``'21,536.76'``) which are stripped."""
+    rows = []
+    for row in ((payload or {}).get("data") or []):
+        try:
+            iso = _roc_to_iso(row[0])
+            close = float(str(row[4]).replace(",", ""))
+        except (IndexError, ValueError, TypeError):
+            continue
+        if iso is not None:
+            rows.append({"date": iso, "close": close})
+    rows.sort(key=lambda r: r["date"])
+    return rows
+
+
+def _months_for(as_of: str | None) -> list[str]:
+    """The two ``yyyymmdd`` month anchors to query (the as_of month + the prior month) so a prev_close
+    survives a month boundary. ``as_of`` ``None`` → the current UTC month (engine code; only the
+    Workflow sandbox forbids ``datetime.now``)."""
+    if as_of:
+        y, m = int(as_of[:4]), int(as_of[5:7])
+    else:
+        now = datetime.now(timezone.utc)
+        y, m = now.year, now.month
+    prev_y, prev_m = (y, m - 1) if m > 1 else (y - 1, 12)
+    return [f"{y:04d}{m:02d}01", f"{prev_y:04d}{prev_m:02d}01"]
+
+
+def fetch_taiex(as_of: str | None = None, *, cache_dir: str | None = None,
+                ttl: float = 43200) -> list[dict]:
+    """TAIEX (``^TWII``) daily closes from TWSE — the key-less fallback when Yahoo can't serve the home
+    index. Queries the as_of month + the prior month (so prev_close survives a month boundary), merges
+    and dedupes by date. Returns ``[{date, close}, …]`` latest-last, or ``[]`` if TWSE is unreachable
+    too (never raises — the caller degrades)."""
+    by_date: dict[str, float] = {}
+    for anchor in _months_for(as_of):
+        try:
+            payload = base.fetch_json(
+                TAIEX_HIST_URL, {"response": "json", "date": anchor},
+                cache_dir=cache_dir, ttl=ttl, rate_key="twse", min_interval=0.6)
+        except base.RateLimitError as e:
+            log.warning("macro fallback: TAIEX %s rate-limited — skipped (%s)", anchor, e)
+            continue
+        except Exception as e:                      # noqa: BLE001 — the fallback must never raise
+            log.warning("macro fallback: TAIEX %s fetch failed — skipped (%s)", anchor, e)
+            continue
+        for bar in parse_taiex_hist(payload):
+            by_date[bar["date"]] = bar["close"]
+    return [{"date": d, "close": by_date[d]} for d in sorted(by_date)]

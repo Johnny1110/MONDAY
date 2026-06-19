@@ -103,6 +103,15 @@ def refresh(data_dir: str, cache_dir: str, symbols=None, as_of: str | None = Non
     meta = settings.macro_symbols
     syms = list(symbols) if symbols is not None else list(meta)
     raw = macro_ingest.fetch_indices(syms, cache_dir=cache_dir, days=days)
+    # Resilience (ADR 0007): the home index / macro-call benchmark is the one symbol the round can't do
+    # without. If Yahoo couldn't serve it (rate-limit / blackout), fill it from TWSE — a different source
+    # family — so a Yahoo outage degrades the global brief but never starves the round of the benchmark.
+    bench = settings.macro_benchmark_symbol
+    if settings.macro_fallback_source == "twse" and bench in syms and bench not in raw:
+        taiex = macro_ingest.fetch_taiex(as_of, cache_dir=cache_dir)
+        if taiex:
+            raw[bench] = taiex
+            log.info("macro: %s served by TWSE fallback (%d bars; Yahoo missed it)", bench, len(taiex))
     if as_of is None:
         as_of = _latest_common_date(raw)
     rows = build_macro_rows(as_of, raw, meta) if as_of else []

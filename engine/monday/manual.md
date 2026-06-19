@@ -60,7 +60,9 @@ macro-analyst reads this and adds world-news colour via `web_search`.
 - `GET /api/macro/{date}` — the IMMUTABLE PIT macro snapshot archived for that day (or a clear empty note).
 - `POST /api/macro/refresh?as_of=` — pull the indices + write today's snapshot now (synchronous, fast,
   cached). data-engineer calls this each morning (STEP 0b). Returns `{as_of, n, rows_on_disk, symbols}`.
-  A dead/blocked ticker is omitted (logged), the rest succeed; a rate-limit degrades, never crashes.
+  A dead/blocked ticker is omitted (logged), the rest succeed; a rate-limit degrades, never crashes. When
+  Yahoo can't serve the benchmark (`^TWII`/TAIEX), it's filled from **TWSE** (key-less fallback, ADR 0007)
+  so a Yahoo blackout degrades the global brief but never starves the round of the home index.
 
 ## Decision plane
 - `GET /api/signals/today` — the model's LATEST candidate ranking (you overlay/veto WITHIN this set;

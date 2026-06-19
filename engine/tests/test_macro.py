@@ -30,6 +30,19 @@ def _raw_from_fixture() -> dict:
     return {sym: macro_ingest.parse_chart(pl) for sym, pl in fixture.items()}
 
 
+# A recorded TWSE MI_5MINS_HIST shape (ROC dates, thousands-separated closes, one malformed row).
+_TAIEX_PAYLOAD = {
+    "stat": "OK",
+    "fields": ["日期", "開盤指數", "最高指數", "最低指數", "收盤指數"],
+    "data": [
+        ["115/06/17", "45,800.00", "46,000.00", "45,700.00", "45,900.50"],
+        ["115/06/18", "45,972.26", "46,565.70", "45,972.26", "46,465.20"],
+        ["bad-row"],                                                       # malformed → skipped
+        ["115/06/16", "45,500.00", "45,850.00", "45,480.00", "45,750.00"],
+    ],
+}
+
+
 class TestMacroParse(unittest.TestCase):
     def test_parse_chart_offset_and_nulls(self):
         fixture = json.loads(_FIXTURE.read_text(encoding="utf-8"))
@@ -117,6 +130,65 @@ class TestMacroSnapshot(unittest.TestCase):
             # re-writing the same as_of overwrites it (idempotent), doesn't duplicate
             n2 = macro.write_macro_snapshot(tmp, "2026-06-19", r19)
             self.assertEqual(n2, len(r18) + len(r19))
+
+
+class TestTaiexFallbackParse(unittest.TestCase):
+    def test_roc_to_iso(self):
+        self.assertEqual(macro_ingest._roc_to_iso("115/06/18"), "2026-06-18")   # ROC year + 1911
+        self.assertEqual(macro_ingest._roc_to_iso("113/06/03"), "2024-06-03")
+        self.assertIsNone(macro_ingest._roc_to_iso("garbage"))
+        self.assertIsNone(macro_ingest._roc_to_iso(None))
+
+    def test_parse_taiex_hist(self):
+        rows = macro_ingest.parse_taiex_hist(_TAIEX_PAYLOAD)
+        self.assertEqual([r["date"] for r in rows],
+                         ["2026-06-16", "2026-06-17", "2026-06-18"])    # ascending, malformed row dropped
+        self.assertEqual(rows[-1]["close"], 46465.2)                    # 收盤指數, commas stripped
+        self.assertEqual(rows[0]["close"], 45750.0)
+
+    def test_parse_taiex_hist_malformed(self):
+        for bad in (None, {}, {"data": None}, {"data": []}):
+            self.assertEqual(macro_ingest.parse_taiex_hist(bad), [])
+
+    def test_months_for(self):
+        self.assertEqual(macro_ingest._months_for("2026-06-18"), ["20260601", "20260501"])
+        self.assertEqual(macro_ingest._months_for("2026-01-05"), ["20260101", "20251201"])  # year boundary
+
+
+@unittest.skipUnless(HAVE_PYARROW, "needs pyarrow for the parquet snapshot")
+class TestMacroFallbackRefresh(unittest.TestCase):
+    def test_twse_fills_benchmark_when_yahoo_blank(self):
+        bench = settings.macro_benchmark_symbol
+        taiex = [{"date": "2026-06-17", "close": 45900.5}, {"date": "2026-06-18", "close": 46465.2}]
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(settings, "macro_fallback_source", "twse"), \
+                mock.patch.object(macro_ingest, "fetch_indices", return_value={}), \
+                mock.patch.object(macro_ingest, "fetch_taiex", return_value=taiex) as ft:
+            out = macro.refresh(tmp, tmp)
+            ft.assert_called_once()                                     # Yahoo blank → fallback invoked
+            self.assertEqual(out["as_of"], "2026-06-18")               # snapshot anchors on the TAIEX date
+            self.assertGreaterEqual(out["n"], 1)
+            snap = macro.read_macro_snapshot(tmp)
+            self.assertIn(bench, {r["symbol"] for r in snap})          # benchmark present despite Yahoo down
+
+    def test_no_fallback_when_yahoo_serves_benchmark(self):
+        bench = settings.macro_benchmark_symbol
+        ydata = {bench: [{"date": "2026-06-17", "close": 1.0}, {"date": "2026-06-18", "close": 2.0}]}
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(settings, "macro_fallback_source", "twse"), \
+                mock.patch.object(macro_ingest, "fetch_indices", return_value=ydata), \
+                mock.patch.object(macro_ingest, "fetch_taiex") as ft:
+            macro.refresh(tmp, tmp)
+            ft.assert_not_called()                                     # Yahoo served it → don't double-fetch
+
+    def test_fallback_disabled_leaves_round_blank(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(settings, "macro_fallback_source", ""), \
+                mock.patch.object(macro_ingest, "fetch_indices", return_value={}), \
+                mock.patch.object(macro_ingest, "fetch_taiex") as ft:
+            out = macro.refresh(tmp, tmp)
+            ft.assert_not_called()                                     # disabled → no fallback
+            self.assertEqual(out["n"], 0)
 
 
 if __name__ == "__main__":
