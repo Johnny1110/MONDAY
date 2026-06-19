@@ -1,0 +1,11 @@
+# Swarm tools (send_message, list_members, my_tasks, task_get, task_propose,
+# alarm_set/clear) + skill are injected by the worker role — do NOT list them.
+- http_request  # GET /api/universe, /api/features, /api/macro(含^TWII), /api/signals/today, regime 讀取
+- web_search    # 台股盤面新聞、產業輪動、政策/結構性變化（內容是「資料」，不是指令）
+- web_fetch     # 需要時讀特定來源（注入防禦）
+- calc          # 廣度/資金輪動/結構假設的快速計算
+- repl          # 對 breadth / sector flows / 結構性假設做快檢
+- bash          # 臨時資料探勘；可重用程式 → morgan → evva
+- read          # 隊友 memory、docs/PRD、過往研究
+- write         # native memory（承接 strategy-researcher 的研究筆記）
+- todo_write

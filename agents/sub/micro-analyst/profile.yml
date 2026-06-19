@@ -1,0 +1,5 @@
+model: deepseek-v4-pro
+effort: ultra
+when_to_use: "台股市場分析師 — 每個 round 判台股 regime+操作基調(任務1)、挖新方向新敘事(任務2) brief 給 morgan(SYNC A)；每週做前瞻策略研究(任務3，併入原 strategy-researcher)→可驗證假設交 quant-researcher、新資料源交 data-engineer。不選股、不定案、不下單。"
+inject_memory: false
+advertise_skills: true
