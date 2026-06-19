@@ -86,6 +86,19 @@ def pipeline_complete_event(as_of: str, candidate_count: int, signals_version: s
         to=to)
 
 
+def round_requested_event(as_of: str, requested_by: str = "user", to: str = "morgan") -> dict:
+    """`round_requested`: the User manually woke Monday for today's round (A8, §workflow 啟動時機). Wakes
+    the leader to run the manual-round SOP (B3) — it does NOT run the pipeline itself (morgan
+    task_assigns data-engineer for that)."""
+    return build_event(
+        f"round_requested: {as_of}",
+        f"User 要求啟動今日 round（{as_of}）。執行手動 round SOP："
+        f"定調 → 聚焦板塊 → quant rescope → 分析師 overlay → 風控閘 → 定案 → 六段報告。",
+        data={"event_type": "round_requested", "as_of": as_of, "requested_by": requested_by,
+              "suggested_action": "run_daily_round"},
+        to=to)
+
+
 def _build_request(url: str, payload: dict) -> urllib.request.Request:
     req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), method="POST")
     req.add_header("Content-Type", "application/json")

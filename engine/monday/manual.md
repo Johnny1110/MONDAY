@@ -14,7 +14,15 @@ Base URL: `http://127.0.0.1:7790`
 ## System
 - `GET /health` — liveness ping.
 - `GET /api/system/status` — versions, last pipeline day, counts, `finmind_token_loaded` (is the
-  data-source key live this process), `universe_size`, and `pipeline` (the currently-running run, if any).
+  data-source key live this process), `universe_size`, `pipeline` (the currently-running run, if any),
+  and `last_round_requested` (the last manual round, A8).
+- `POST /api/system/run-round?force=false` — **the 2.0 daily entry point**: wake morgan to run today's
+  manual round (it then orchestrates the whole DAG — data-engineer → analysts → quant → risk → report).
+  Fires a `round_requested` webhook to the leader. **Idempotent**: one wake per trading day; `force=true`
+  re-wakes (second same-day call returns **409** `already_requested`). It does NOT run the pipeline and
+  does NOT take the single-flight lock; it 200s even if the swarm is down (fire-and-forget). Day anchors
+  on `last_as_of` (the data's trading day), not wall-clock. (The dashboard "Run today's round" button and
+  the User messaging morgan in evva web are the human triggers.)
 - `POST /api/system/run-pipeline?source=finmind&model=gbdt&finalize=true&days=180` — trigger the
   chain (ingest → clean → PIT snapshot → features → model → signals [→ recommend → mark]).
   **ASYNC**: returns `{task_id, status:"running"}` (202) at once and runs in the background — **poll

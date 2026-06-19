@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
-from .. import __version__, store, tasks
+from .. import __version__, events, store, tasks
 from ..config import redacted_database_url, settings
 
 router = APIRouter(prefix="/api/system", tags=["system"])
@@ -37,9 +37,30 @@ def status() -> dict:
         "finmind_token_loaded": bool(settings.finmind_token),   # B4 — presence only, never the value
         "universe_size": settings.universe_size,
         "pipeline": store.pipeline_lock_holder(),               # the currently-running pipeline, if any
+        "last_round_requested": json.loads(store.kv_get("last_round_requested") or "null"),  # A8
         "data_dir": settings.data_dir,
         "database": redacted_database_url(),                     # host:port/db — creds redacted (token-free)
     }
+
+
+@router.post("/run-round")
+def run_round(as_of: str | None = None, force: bool = False):
+    """Wake morgan to run today's manual round (A8, §workflow 啟動時機) — morgan then orchestrates the
+    whole DAG (B3). **Idempotent**: one wake per trading day unless ``force=true``. Does NOT run the
+    pipeline or touch the single-flight lock (morgan task_assigns data-engineer for that). 200s even when
+    the swarm is unreachable (the webhook is fire-and-forget, invariant 8) so the dashboard button always
+    gets feedback. ``day`` anchors on ``last_as_of`` (the trading day the data is for), not wall-clock."""
+    day = as_of or store.kv_get("last_as_of") or datetime.now(timezone.utc).date().isoformat()
+    already = store.kv_get(f"round_requested:{day}")
+    if already and not force:
+        return JSONResponse(status_code=409,
+                            content={"status": "already_requested", "as_of": day, "at": already})
+    ts = datetime.now(timezone.utc).isoformat()
+    store.kv_set(f"round_requested:{day}", ts)
+    store.kv_set("last_round_requested", json.dumps({"as_of": day, "at": ts}))
+    events.post(settings.evva_webhook_url, events.round_requested_event(day, "user"))
+    log.info("run-round: woke morgan for %s (force=%s)", day, force)
+    return {"status": "requested", "as_of": day, "at": ts}
 
 
 @router.post("/run-pipeline")

@@ -102,6 +102,52 @@ class TestSystemAsync(unittest.TestCase):
             self.assertEqual(store.get_recommendation("2026-06-16:2330")["signals_version"],
                              "2026-06-16#fv")
 
+    def test_run_round_fires_once(self):
+        from monday import events, store
+        with self._client() as c, mock.patch.object(events, "post") as ep:
+            store.kv_set("last_as_of", "2026-06-19")
+            r = c.post("/api/system/run-round")
+            self.assertEqual(r.status_code, 200)
+            self.assertEqual(r.json()["as_of"], "2026-06-19")
+            self.assertEqual(ep.call_count, 1)                       # exactly one wake
+            ev = ep.call_args[0][1]                                  # post(url, payload)
+            self.assertEqual(ev["data"]["event_type"], "round_requested")
+            self.assertEqual(ev["to"], "morgan")
+            self.assertIsNotNone(store.kv_get("round_requested:2026-06-19"))
+            # second call the same day → 409, NO second webhook
+            r2 = c.post("/api/system/run-round")
+            self.assertEqual(r2.status_code, 409)
+            self.assertEqual(r2.json()["status"], "already_requested")
+            self.assertEqual(ep.call_count, 1)
+            # force overrides → re-fires
+            self.assertEqual(c.post("/api/system/run-round?force=true").status_code, 200)
+            self.assertEqual(ep.call_count, 2)
+            self.assertIsNone(store.pipeline_lock_holder())          # never touched the pipeline lock
+
+    def test_run_round_webhook_safe(self):
+        # fire-and-forget: an unreachable swarm must NOT 500 the endpoint (invariant 8)
+        from monday import store
+        from monday.config import settings
+        orig = settings.evva_webhook_url
+        with self._client() as c:
+            settings.evva_webhook_url = "http://127.0.0.1:1/dead"   # real events.post → connection refused
+            try:
+                store.kv_set("last_as_of", "2026-06-19")
+                r = c.post("/api/system/run-round")
+                self.assertEqual(r.status_code, 200)
+                self.assertEqual(r.json()["status"], "requested")
+            finally:
+                settings.evva_webhook_url = orig
+
+    def test_status_shows_last_round(self):
+        from monday import events, store
+        with self._client() as c, mock.patch.object(events, "post"):
+            store.kv_set("last_as_of", "2026-06-19")
+            c.post("/api/system/run-round")
+            st = c.get("/api/system/status").json()
+            self.assertIn("last_round_requested", st)
+            self.assertEqual(st["last_round_requested"]["as_of"], "2026-06-19")
+
     def test_finalize_replaces_not_appends(self):
         """Each finalize is a complete new book — old open positions are closed, not accumulated."""
         from monday import store
