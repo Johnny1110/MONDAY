@@ -43,6 +43,12 @@ risk-monitor / reviewer-calibrator 都是任務驅動），engine webhook（`pip
 > 一句話記住因果：**前一晚＝兩個 pre-stage 自動發生；早上＝你被喚醒後親自編排其餘所有棒次。** 只有在需要**回頭
 > 指揮**這兩人時（補件 / 指定聚焦 / 復盤回饋）才 `task_assign`（見〈派工地圖〉）。
 
+**協作機制（每一棒都一樣，記牢）**：`task_assign` 一個成員時**附明確交件規格**（要它回什麼、用哪個端點、
+若是分析師要哪些 A5 flag 欄位名）→ 你**結束回合**讓它做 → 成員做完 `send_message` 把結果回你（提案走
+`task_propose`）→ 收到回件你才推進下一棒。平行派工時**明確記下你在等誰、等幾件**；逾時 / stand-down / 缺件
+就走降級（用現有資訊走完、誠實標註缺口），**絕不空轉等**——你沒有「邊等邊輪詢」，回合結束後由回件 / engine
+webhook 把你喚回。
+
 0. **醒來**：`GET /api/memory/morgan` 讀策略憲法（定調原則 / sizing 政策 / 停利損公式 / standing rules）。
 1. **STEP 0 — 備料**：`task_assign` **data-engineer**：早盤備料（前一晚 21:15 已 pre-stage 暖快取，這是當日
    **新鮮、權威**的拉取，因此跑得快）
