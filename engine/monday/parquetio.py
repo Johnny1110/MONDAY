@@ -37,7 +37,12 @@ def write_table(path: str, rows: list[dict], append: bool = False) -> int:
         rows = read_rows(path) + rows
     if not rows:
         return 0
-    table = pa.Table.from_pylist(rows)
+    # PyArrow from_pylist infers the schema from the FIRST row only — later rows' new keys
+    # are silently dropped. Normalise all dicts to the union of all keys so every column
+    # survives (critical when upsert combines old rows missing a new column + new rows).
+    all_keys = sorted({k for r in rows for k in r})
+    normalised = [{k: r.get(k) for k in all_keys} for r in rows]
+    table = pa.Table.from_pylist(normalised)
     pq.write_table(table, str(p))
     return len(rows)
 
