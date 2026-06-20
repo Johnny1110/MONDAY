@@ -18,7 +18,22 @@ def rank_universe(bars: list[dict], top_n: int) -> list[tuple[str, str]]:
 
 def build_universe(top_n: int, cache_dir: str | None = None) -> list[tuple[str, str]]:
     """Top-N listed names by liquidity from TWSE + TPEx (one keyless cross-section call each,
-    cached). Merges both boards so OTC stocks aren't systemically excluded."""
+    cached). Merges both boards so OTC stocks aren't systemically excluded. TPEx is best-effort:
+    a failure (weekend empty response / SSL / rate-limit) degrades gracefully to TWSE-only —
+    the pipeline must not sink on one board's API."""
+    import logging
     from . import twse, tpex
-    all_bars = twse.fetch_daily_all(cache_dir=cache_dir) + tpex.fetch_daily_all(cache_dir=cache_dir)
+    log = logging.getLogger("monday.ingest.universe")
+
+    all_bars = twse.fetch_daily_all(cache_dir=cache_dir)
+    try:
+        tpex_bars = tpex.fetch_daily_all(cache_dir=cache_dir)
+        if tpex_bars:
+            all_bars += tpex_bars
+            log.info("universe: TWSE + TPEx = %d bars", len(all_bars))
+        else:
+            log.warning("universe: TPEx returned empty — TWSE-only (%d bars)", len(all_bars))
+    except Exception as e:
+        log.warning("universe: TPEx fetch failed (%s) — TWSE-only (%d bars)", e, len(all_bars))
+
     return rank_universe(all_bars, top_n)

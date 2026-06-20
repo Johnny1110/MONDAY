@@ -118,14 +118,28 @@ def fetch_json(url: str, params: dict | None = None, *, cache_dir: str | None = 
     full = url + ("?" + urllib.parse.urlencode(params) if params else "")
     req = urllib.request.Request(full, headers=headers or {"User-Agent": "monday-engine/0.0.1"})
     err = None
+    ssl_fallback = False                          # BUG-022: TPEx SSL fails on Python 3.14 / macOS
     for attempt in range(retries):
         _rate_limit(rate_key, min_interval)
         _quota_bump(rate_key)                    # a real request is about to leave (cache hits never reach here)
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            # Normal SSL context; on the second+ attempt and after an SSL error, fall back to
+            # unverified context (TPEx TLS certificates may lack a Subject Key Identifier).
+            ctx = None
+            if ssl_fallback:
+                import ssl as _ssl
+                ctx = _ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = _ssl.CERT_NONE
+            kwargs = {"timeout": timeout}
+            if ssl_fallback:
+                kwargs["context"] = ctx
+            with urllib.request.urlopen(req, **kwargs) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             if cache_file is not None:
                 _write_cache(cache_file, data)
+            if ssl_fallback:
+                log.info("ingest fetch %s succeeded with SSL fallback", url)
             return data
         except urllib.error.HTTPError as e:
             if e.code in (402, 429):             # source quota / rate limit — in-run retry is futile
@@ -136,6 +150,12 @@ def fetch_json(url: str, params: dict | None = None, *, cache_dir: str | None = 
             time.sleep(0.8 * (attempt + 1))
         except (urllib.error.URLError, ValueError, TimeoutError, OSError) as e:
             err = e
+            # URLError wrapping an SSLError → enable fallback for remaining attempts
+            if isinstance(e, urllib.error.URLError) and hasattr(e, "reason"):
+                reason = e.reason
+                if isinstance(reason, Exception) and "SSL" in type(reason).__name__:
+                    ssl_fallback = True
+                    log.warning("ingest SSL error — will retry with fallback: %s", e)
             log.warning("ingest fetch %s failed (attempt %d/%d): %s", url, attempt + 1, retries, e)
             time.sleep(0.8 * (attempt + 1))
     raise RuntimeError(f"ingest fetch failed after {retries} attempts: {url}: {err}")
