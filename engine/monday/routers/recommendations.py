@@ -63,7 +63,21 @@ def finalize(payload: dict) -> dict:
     # Close all open positions first — finalize replaces the book, not appends to it.
     # This keeps total_open ≤ max_recommendations and prevents duplicate symbol exposure
     # from prior-day entries coexisting with the new composition.
+    # Each old position is SETTLED at the as_of close so realized P&L is recorded (exit_reason
+    # = "finalize_replace") — the ledger outcomes + equity curve stay honest (BUG-022 variant).
+    from ..featurestore import build as fbuild
+    feature_rows = fbuild.read_features(settings.data_dir, env["as_of_date"])
+    close_map = {r["symbol"]: r["close"] for r in feature_rows if r.get("close")}
     for pos in store.list_positions(status="open"):
+        rec = store.get_recommendation(pos["rec_id"]) or {}
+        exit_price = close_map.get(pos["symbol"])
+        if exit_price:
+            oc = portfolio.settle(pos["entry_price"], exit_price,
+                                  rec.get("predicted_return"), pos.get("direction", "long"),
+                                  reason="finalize_replace", cost=settings.round_trip_cost_pct)
+            oc.update({"rec_id": pos["rec_id"], "exit_date": env["as_of_date"],
+                       "exit_price": exit_price})
+            store.add_outcome(oc)
         store.close_position(pos["rec_id"])
 
     import pathlib
