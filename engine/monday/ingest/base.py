@@ -107,8 +107,12 @@ def _rate_limit(rate_key: str | None, min_interval: float) -> None:
 
 def fetch_json(url: str, params: dict | None = None, *, cache_dir: str | None = None,
                ttl: float = 86400, rate_key: str | None = None, min_interval: float = 0.6,
-               retries: int = 3, timeout: float = 20, headers: dict | None = None):
-    """GET JSON with cache → rate-limit → retry. Returns parsed JSON; raises after ``retries``."""
+               retries: int = 3, timeout: float = 20, headers: dict | None = None,
+               opener=None):
+    """GET JSON with cache → rate-limit → retry. Returns parsed JSON; raises after ``retries``.
+    Optional ``opener`` (urllib.request.OpenerDirector with cookie support) is used for the
+    request instead of the module-level ``urlopen`` — callers that need persistent cookies
+    (e.g. Yahoo macro) create a shared opener and pass it here."""
     cache_file = _cache_path(cache_dir, url, params) if cache_dir else None
     if cache_file is not None:
         cached = _read_cache(cache_file, ttl)
@@ -134,7 +138,8 @@ def fetch_json(url: str, params: dict | None = None, *, cache_dir: str | None = 
             kwargs = {"timeout": timeout}
             if ssl_fallback:
                 kwargs["context"] = ctx
-            with urllib.request.urlopen(req, **kwargs) as resp:
+            do_open = opener.open if opener else urllib.request.urlopen
+            with do_open(req, **kwargs) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             if cache_file is not None:
                 _write_cache(cache_file, data)

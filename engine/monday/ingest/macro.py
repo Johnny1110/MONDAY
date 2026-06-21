@@ -75,21 +75,57 @@ def fetch_indices(symbols: list[str], *, cache_dir: str | None = None, days: int
     """Per symbol: GET the Yahoo chart via ``base.fetch_json`` (key-less, cached, rate-limited) and
     parse to ``[{date, close}, …]`` latest-last. Returns ``{symbol: rows}``, **omitting** any symbol
     that fails (dead ticker / malformed JSON / rate-limit) — a partial macro read is still useful and
-    must never raise into the caller (invariant 8 spirit)."""
+    must never raise into the caller (invariant 8 spirit).
+
+    Uses a shared cookie-jar opener so Yahoo treats the batch as one browser session instead of
+    isolated bot requests (2026-06: Yahoo tightened anti-bot to require cookies even on the public
+    v8 API; isolated requests hit 429 instantly)."""
+    import http.cookiejar
+    import urllib.request as _urllib
+    from . import base as _base
+
+    # Shared session with cookie support — one browser session for all symbols
+    cj = http.cookiejar.CookieJar()
+    opener = _urllib.build_opener(_urllib.HTTPCookieProcessor(cj))
+
+    # Pre-warm: visit Yahoo's consent page so the session carries GUC/A1/A3 cookies before the
+    # first chart call. Without cookies Yahoo treats every request as a cookieless bot and 429s
+    # the very first attempt — even with a shared opener (2026-06).
+    try:
+        req = _urllib.Request("https://guce.yahoo.com/consent", headers={"User-Agent": _UA})
+        opener.open(req, timeout=8)
+    except Exception:
+        pass  # best-effort — the opener is still useful even without pre-warmed cookies
+
     out: dict[str, list[dict]] = {}
     rng = _range_for(days)
     for sym in symbols:
-        try:
-            payload = base.fetch_json(
-                CHART_URL.format(symbol=urllib.parse.quote(sym)),
-                {"range": rng, "interval": "1d"},
-                cache_dir=cache_dir, ttl=ttl, rate_key="yahoo", min_interval=0.4,
-                headers={"User-Agent": _UA})
-        except base.RateLimitError as e:
-            log.warning("macro: %s rate-limited — omitted (%s)", sym, e)
-            continue
-        except Exception as e:                      # noqa: BLE001 — one bad ticker never sinks the batch
-            log.warning("macro: %s fetch failed — omitted (%s)", sym, e)
+        payload = None
+        rate_hit = False
+        for rate_retry in range(3):               # 2026-06: Yahoo rate-limits aggressively — retry with backoff
+            try:
+                payload = _base.fetch_json(
+                    CHART_URL.format(symbol=urllib.parse.quote(sym)),
+                    {"range": rng, "interval": "1d"},
+                    cache_dir=cache_dir, ttl=ttl, rate_key="yahoo", min_interval=2.0,
+                    headers={"User-Agent": _UA}, opener=opener)
+                break                               # success — exit the rate-retry loop
+            except _base.RateLimitError as e:
+                rate_hit = True
+                if rate_retry < 2:
+                    import time as _time
+                    wait = 5 * (rate_retry + 1)     # 5s, 10s backoff
+                    log.debug("macro: %s 429 — pausing %d s before retry %d", sym, wait, rate_retry + 1)
+                    _time.sleep(wait)
+                    continue
+                log.warning("macro: %s rate-limited after %d retries — omitted (%s)", sym, rate_retry, e)
+                break
+            except Exception as e:                  # noqa: BLE001 — one bad ticker never sinks the batch
+                log.warning("macro: %s fetch failed — omitted (%s)", sym, e)
+                break
+        if payload is None:
+            if not rate_hit:
+                pass  # already logged in the exception handler
             continue
         rows = parse_chart(payload)
         if rows:
