@@ -92,6 +92,7 @@ class Settings(BaseSettings):
         "000001.SS": {"name": "上證指數",       "asset_class": "equity_index"},
         "^HSI":      {"name": "恒生指數",       "asset_class": "equity_index"},
         "^N225":     {"name": "日經225",        "asset_class": "equity_index"},
+        "^KS11":     {"name": "韓國KOSPI",      "asset_class": "equity_index"},
         "^STOXX50E": {"name": "歐洲STOXX50",    "asset_class": "equity_index"},
         "^VIX":      {"name": "VIX 波動率",     "asset_class": "vol"},
         "USDTWD=X":  {"name": "美元兌台幣",     "asset_class": "fx"},

@@ -20,7 +20,7 @@ from . import parquetio
 log = logging.getLogger("monday.macro")
 
 # Indices whose move is read as a risk barometer for TW (semis beta, fear, rates, FX pressure).
-_RISK_PROXIES = ("^SOX", "^VIX", "^TNX", "USDTWD=X")
+_RISK_PROXIES = ("^SOX", "^VIX", "^TNX", "USDTWD=X", "^KS11")
 
 
 def build_macro_rows(as_of: str, raw: dict[str, list[dict]], meta: dict) -> list[dict]:
