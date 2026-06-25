@@ -99,6 +99,13 @@ def compose_recommendations(preds: list[dict], as_of: str, model_version: str,
                          signals_version=signals_version)
         store.add_recommendation(rec)
         portfolio.open_from_recommendation(rec)
+        # Record the "open" lifecycle action so calibration/positions can trace the full lifecycle
+        # (entry date → trim/exit → value-add). position_id = rec_id for the paper portfolio.
+        store.add_position_action({
+            "position_id": rec["rec_id"], "symbol": c["symbol"], "action_date": as_of,
+            "action": "open", "prev_qty": 0.0, "new_qty": 1.0, "delta_qty": 1.0,
+            "decided_by": "pipeline",
+        })
         recs.append(rec)
     envelope = _rec_envelope(recs, as_of, model_version, regime)
     store.kv_set("recommendations_today", json.dumps(envelope, ensure_ascii=False))

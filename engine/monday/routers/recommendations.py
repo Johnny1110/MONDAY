@@ -78,6 +78,14 @@ def finalize(payload: dict) -> dict:
             oc.update({"rec_id": pos["rec_id"], "exit_date": env["as_of_date"],
                        "exit_price": exit_price})
             store.add_outcome(oc)
+        # Record the lifecycle action so calibration/positions can evaluate trim/exit value-add
+        # (A9, task #82). position_id = rec_id for the paper portfolio.
+        store.add_position_action({
+            "position_id": pos["rec_id"], "symbol": pos["symbol"],
+            "action_date": env["as_of_date"], "action": "exit",
+            "prev_qty": 1.0, "new_qty": 0.0, "delta_qty": -1.0,
+            "reason": "finalize_replace", "decided_by": "morgan",
+        })
         store.close_position(pos["rec_id"])
 
     import pathlib
