@@ -34,16 +34,18 @@ _quota: dict[str, dict] = {}
 _quota_lock = threading.Lock()
 
 
-def _quota_bump(rate_key: str | None, *, rate_limited: bool = False) -> None:
+def _quota_bump(rate_key: str | None, *, rate_limited: bool = False, timeout: bool = False) -> None:
     if not rate_key:
         return
     iso = datetime.now(timezone.utc).isoformat()
     with _quota_lock:
-        q = _quota.setdefault(rate_key, {"calls": 0, "rate_limited": 0,
+        q = _quota.setdefault(rate_key, {"calls": 0, "rate_limited": 0, "timeouts": 0,
                                          "last_call_at": None, "last_rate_limited_at": None})
         if rate_limited:
             q["rate_limited"] += 1
             q["last_rate_limited_at"] = iso
+        elif timeout:
+            q["timeouts"] += 1
         else:
             q["calls"] += 1
             q["last_call_at"] = iso
@@ -152,7 +154,7 @@ def fetch_json(url: str, params: dict | None = None, *, cache_dir: str | None = 
                 raise RateLimitError(f"{url}: HTTP {e.code} (rate limit / quota)") from e
             err = e
             log.warning("ingest fetch %s failed (attempt %d/%d): %s", url, attempt + 1, retries, e)
-            time.sleep(0.8 * (attempt + 1))
+            time.sleep(min(1.0 * (2 ** attempt), 10.0))   # 1s, 2s, 4s (capped 10s)
         except (urllib.error.URLError, ValueError, TimeoutError, OSError) as e:
             err = e
             # URLError wrapping an SSLError → enable fallback for remaining attempts
@@ -161,6 +163,7 @@ def fetch_json(url: str, params: dict | None = None, *, cache_dir: str | None = 
                 if isinstance(reason, Exception) and "SSL" in type(reason).__name__:
                     ssl_fallback = True
                     log.warning("ingest SSL error — will retry with fallback: %s", e)
+            _quota_bump(rate_key, timeout=True)         # B3b: track timeout rate for reviewer
             log.warning("ingest fetch %s failed (attempt %d/%d): %s", url, attempt + 1, retries, e)
-            time.sleep(0.8 * (attempt + 1))
+            time.sleep(min(1.0 * (2 ** attempt), 10.0))   # 1s, 2s, 4s (capped 10s)
     raise RuntimeError(f"ingest fetch failed after {retries} attempts: {url}: {err}")

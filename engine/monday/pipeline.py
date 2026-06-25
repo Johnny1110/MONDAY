@@ -220,8 +220,31 @@ def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
     cache_dir = str(pathlib.Path(settings.data_dir) / "cache")
     parsed_symbols = ([(s.strip(), s.strip()) for s in symbols.split(",") if s.strip()]
                       if symbols else None)      # B5: explicit symbol list, e.g. "2330,2317"
-    bars = fetch(days=days + mark_forward, cache_dir=cache_dir, token=settings.finmind_token,
-                 symbols=parsed_symbols, universe_size=universe_size)
+    ingest_ok = True
+    circuit_tripped = False
+    try:
+        bars = fetch(days=days + mark_forward, cache_dir=cache_dir, token=settings.finmind_token,
+                     symbols=parsed_symbols, universe_size=universe_size)
+    except Exception as e:                        # noqa: BLE001 — circuit breaker: degrade, don't crash
+        log.warning("pipeline ingest failed: %s", e)
+        ingest_ok = False
+        circuit_tripped = True
+        # Try fallback: use the latest cached snapshot bars
+        from . import snapshot as _snapshot_mod
+        last = store.kv_get("last_as_of")
+        bars = _snapshot_mod.read_snapshot(settings.data_dir, last) if last else []
+        if not bars:
+            # Check if previous run also tripped — two consecutive trips = hard fail
+            prev_tripped = store.kv_get("cb_tripped")
+            store.kv_set("cb_tripped", "1")
+            if prev_tripped:
+                raise RuntimeError(
+                    f"ingest failed and no cached fallback available — "
+                    f"2 consecutive circuit breaker trips ({e})") from e
+            raise  # first trip, let it fail — next run will hard-fail if still broken
+        store.kv_set("cb_tripped", "0")
+    else:
+        store.kv_set("cb_tripped", "0")
     if not bars:
         raise RuntimeError(f"ingest source {source!r} returned no bars")
     dates = sorted({b["date"] for b in bars})
@@ -231,7 +254,9 @@ def run(as_of: str | None = None, days: int = 180, mark_forward: int = 1,
     out["as_of"] = as_of
     store.kv_set("last_as_of", as_of)            # routers default to this trading day
     out["stages"]["ingest"] = {"source": source, "bars": len(bars),
-                               "symbols": len({b["symbol"] for b in bars})}
+                               "symbols": len({b["symbol"] for b in bars}),
+                               "degraded": not ingest_ok,
+                               "circuit_breaker_tripped": circuit_tripped}
     visible = [b for b in bars if b["date"] <= as_of]
 
     # 2 — clean + hard universe gate
