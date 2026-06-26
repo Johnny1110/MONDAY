@@ -97,6 +97,20 @@ def macro_drift_event(hit_rate: float, periods: int, to: str = "morgan") -> dict
         to=to)
 
 
+def regime_shift_event(ic: float, corr: float, to: str = "reviewer-calibrator") -> dict:
+    """`regime_shift`: calibration IC dipped but the drop correlates with benchmark return
+    (|corr| > 0.7) — this is a market regime change, not model degradation. The drift alert is
+    suppressed; this softer event records the observation for the Friday review (task #101)."""
+    return build_event(
+        f"regime shift suspected: IC {ic:+.2f}, |corr(IC,benchmark)|={abs(corr):.2f}",
+        f"IC 降至 {ic:+.2f} 但與大盤報酬高度相關（|r|={abs(corr):.2f}>0.7），"
+        f"推測為 regime shift 而非模型退化。保持觀察，不強制重訓。",
+        data={"event_type": "regime_shift", "ic": round(ic, 3),
+              "benchmark_corr": round(corr, 3),
+              "suggested_action": "週五複盤確認 regime；若持續則記 ADR 並調整校準 baseline。"},
+        to=to)
+
+
 def round_requested_event(as_of: str, requested_by: str = "user", to: str = "morgan") -> dict:
     """`round_requested`: the User manually woke Monday for today's round (A8, §workflow 啟動時機). Wakes
     the leader to run the manual-round SOP (B3) — it does NOT run the pipeline itself (morgan

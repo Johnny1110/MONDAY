@@ -57,7 +57,7 @@ def _scorecard() -> dict:
         "calibration_curve": curve,
         "brier": calc.brier(probs, hits),                    # single calibration KPI (lower = better)
         "reliability_gap": calc.reliability_gap(curve),       # mean |observed − predicted| across bins
-        "attribution_by_regime": calc.attribution(rows, "regime_label"),
+        "attribution_by_regime": calc.attribution_with_ic(rows, "regime_label"),
         "attribution_by_factor": calc.attribution(rows, "contributing_factors"),
         "note": "P0: realized = settled outcome if present, else latest mark mtm (open ideas).",
     }
@@ -83,15 +83,30 @@ def save_run(window: str = "adhoc", post: bool = True) -> dict:
     macro = calc.macro_call_accuracy(store.list_macro_calls())               # A9 dim
     posmgmt = calc.position_mgmt_value(store.list_position_actions(), _position_realized_lookup())  # A9 dim
     as_of = store.kv_get("last_as_of")
+    # Regime-aware calibration (task #101): record the benchmark return + regime state so
+    # subsequent drift checks can distinguish regime shift from model degradation.
+    bench_pct = None
+    regime_state = None
+    if as_of:
+        from .. import macro as macro_mod
+        for r in macro_mod.read_macro_snapshot(settings.data_dir, as_of):
+            if r.get("symbol") == settings.macro_benchmark_symbol:
+                bench_pct = r.get("chg_pct")
+                break
+        raw_sig = store.kv_get("signals_today")
+        if raw_sig:
+            regime_state = json.loads(raw_sig).get("regime")
     run_id = f"calib-{as_of or 'na'}-{len(store.list_calibration_runs()) + 1}"
     run = store.add_calibration_run({
         "run_id": run_id, "run_date": as_of, "window": window,
         "hit_rate": sc["hit_rate"], "tp_hit_rate": None,
         "avg_win": sc["avg_win"], "avg_loss": sc["avg_loss"], "ic": sc["ic"],
-        "excess_vs_taiex": None, "attribution": sc["attribution_by_factor"],
+        "excess_vs_taiex": bench_pct, "attribution": sc["attribution_by_factor"],
         "adjustments": {"note": "P0 scorecard snapshot; ADR-linked adjustments land in P1 (§6.4).",
                         "brier": sc["brier"], "reliability_gap": sc["reliability_gap"],
-                        "macro": macro, "position_mgmt": posmgmt},   # A9: judgement dims, JSON-folded
+                        "regime_state": regime_state, "benchmark_chg_pct": bench_pct,
+                        "attribution_by_regime": sc["attribution_by_regime"],
+                        "macro": macro, "position_mgmt": posmgmt},
     })
     fired = triggers.evaluate_calibration(
         store.list_calibration_runs(), ic_floor=settings.calibration_ic_floor,

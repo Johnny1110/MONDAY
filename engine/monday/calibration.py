@@ -200,3 +200,45 @@ def attribution(rows: list[dict], key: str) -> dict:
                 continue
             agg.setdefault(str(g), []).append(rr)
     return {str(k): {"mean": round(sum(v) / len(v), 4), "n": len(v)} for k, v in agg.items()}
+
+
+def attribution_with_ic(rows: list[dict], key: str) -> dict:
+    """Per-group mean realized return, n, AND rank IC (predicted vs realized within each group).
+    Drives regime-aware calibration: a regime shift depresses IC across regimes, but model
+    degradation hits specific regimes — the per-regime IC tells them apart (task #101).
+    Same split semantics as ``attribution``."""
+    aggr: dict[str, list[float]] = {}                # realized returns per group
+    aggp: dict[str, list[float]] = {}                # predicted returns per group (for IC)
+    for r in rows:
+        rr = r.get("realized_return")
+        pr = r.get("predicted_return")
+        if rr is None:
+            continue
+        g = r.get(key)
+        if isinstance(g, list):
+            if not g:
+                continue
+            for gg in g:
+                if gg is None:
+                    continue
+                aggr.setdefault(str(gg), []).append(rr / len(g))
+                if pr is not None:
+                    aggp.setdefault(str(gg), []).append(pr / len(g))
+        else:
+            if g is None:
+                continue
+            aggr.setdefault(str(g), []).append(rr)
+            if pr is not None:
+                aggp.setdefault(str(g), []).append(pr)
+    out = {}
+    for k in aggr:
+        entry: dict = {"mean": round(sum(aggr[k]) / len(aggr[k]), 4), "n": len(aggr[k])}
+        if k in aggp and len(aggp[k]) >= 2:
+            entry["ic"] = rank_ic(aggp[k], aggr[k])
+        out[k] = entry
+    return out
+
+
+def regime_ic(rows: list[dict]) -> dict:
+    """Per-regime IC — shortcut for ``attribution_with_ic(rows, 'regime_label')``."""
+    return attribution_with_ic(rows, "regime_label")

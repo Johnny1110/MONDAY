@@ -38,12 +38,16 @@ def evaluate(equity_curve: list[float], drawdown_threshold: float) -> list[dict]
 # Calibration detectors (§6.3) — read the calibration_runs history
 # --------------------------------------------------------------------------
 
-def calibration_series(runs: list[dict]) -> tuple[list[float | None], dict[str, list[float | None]]]:
+def calibration_series(runs: list[dict]) -> tuple[list[float | None], dict[str, list[float | None]], list[float | None]]:
     """From calibration_runs (any order) → (ic_history oldest-first, {factor: contribution means
-    oldest-first}). Each run's ``attribution`` is {factor: {mean, n}} (the factor's mean realized return)
-    or absent → None for that run (a gap breaks a decay streak — conservative)."""
+    oldest-first}, benchmark_returns oldest-first). Each run's ``attribution`` is {factor: {mean, n}}
+    (the factor's mean realized return) or absent → None for that run (a gap breaks a decay streak —
+    conservative). ``benchmark_returns`` are the TAIEX chg_pct at each run (None where absent)."""
     runs = sorted(runs, key=lambda r: (r.get("run_date") or "", str(r.get("run_id") or "")))
     ic_history = [r.get("ic") for r in runs]
+    benchmark_returns = [
+        (r.get("adjustments") or {}).get("benchmark_chg_pct") for r in runs
+    ]
     per_run, all_factors = [], set()
     for r in runs:
         attr = r.get("attribution") or {}
@@ -51,7 +55,7 @@ def calibration_series(runs: list[dict]) -> tuple[list[float | None], dict[str, 
         per_run.append(means)
         all_factors |= set(means)
     factor_means = {f: [pr.get(f) for pr in per_run] for f in all_factors}
-    return ic_history, factor_means
+    return ic_history, factor_means, benchmark_returns
 
 
 def detect_calibration_drift(ic_history: list[float | None], floor: float, weeks: int) -> dict | None:
@@ -88,11 +92,24 @@ def detect_macro_drift(hit_history: list[float | None], floor: float, periods: i
 
 def evaluate_calibration(runs: list[dict], *, ic_floor: float, drift_weeks: int,
                          decay_periods: int) -> list[dict]:
-    """The calibration trigger payloads the run history warrants (built, not yet posted)."""
-    ic_history, factor_means = calibration_series(runs)
+    """The calibration trigger payloads the run history warrants (built, not yet posted).
+    Regime-aware (task #101): when IC drops but the drop correlates with benchmark return
+    (|corr| > 0.7), the drift is suppressed — a regime_shift event fires instead."""
+    ic_history, factor_means, benchmark_returns = calibration_series(runs)
     out: list[dict] = []
     drift = detect_calibration_drift(ic_history, ic_floor, drift_weeks)
     if drift:
-        out.append(drift)
+        # Regime-aware gate: if IC moves with the market, it's regime shift, not model decay
+        recent_ic = [ic for ic in ic_history[-drift_weeks:] if ic is not None]
+        recent_bm = [b for b in benchmark_returns[-drift_weeks:] if b is not None]
+        if len(recent_ic) >= 2 and len(recent_bm) >= 2 and len(recent_ic) == len(recent_bm):
+            from .calibration import _pearson
+            corr = _pearson(recent_ic, recent_bm)
+            if corr is not None and abs(corr) > 0.7:
+                out.append(events.regime_shift_event(round(recent_ic[-1], 3), corr))
+            else:
+                out.append(drift)
+        else:
+            out.append(drift)
     out.extend(detect_factor_decay(factor_means, decay_periods))
     return out
